@@ -158,6 +158,33 @@ describe("mergeLiveModels", () => {
     expect(merged.models.find((m) => m.id === "")).toBeUndefined();
     expect(merged.models.find((m) => m.id === "legit-id")).toBeDefined();
   });
+
+  it("uses the provider display name as the label when present", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, [
+      { id: "claude-opus-5", displayName: "Claude Opus 5" },
+      { id: "claude-mystery-1" },
+    ]);
+    expect(merged.models.find((m) => m.id === "claude-opus-5")!.label).toBe("Claude Opus 5");
+    expect(merged.models.find((m) => m.id === "claude-mystery-1")!.label).toBe("claude-mystery-1");
+  });
+
+  it("assigns live models to a baseline family when the id contains one", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, [
+      "claude-opus-5",
+      "claude-sonnet-5-20270101",
+      "claude-unrelated-model",
+    ]);
+    expect(merged.models.find((m) => m.id === "claude-opus-5")!.family).toBe("opus");
+    expect(merged.models.find((m) => m.id === "claude-sonnet-5-20270101")!.family).toBe("sonnet");
+    expect(merged.models.find((m) => m.id === "claude-unrelated-model")!.family).toBeUndefined();
+  });
+
+  it("groups family-inferred live models with their baseline family", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, ["claude-opus-5"]);
+    const groups = groupModelsByFamily(merged);
+    const opusGroup = groups.find((g) => g.family === "opus")!;
+    expect(opusGroup.models.some((m) => m.id === "claude-opus-5")).toBe(true);
+  });
 });
 
 describe("groupModelsByFamily", () => {

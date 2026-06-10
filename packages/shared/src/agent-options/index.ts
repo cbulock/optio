@@ -4,10 +4,11 @@ import { GEMINI_CATALOG } from "./gemini.js";
 import { COPILOT_CATALOG } from "./copilot.js";
 import { OPENCODE_CATALOG } from "./opencode.js";
 import { OPENCLAW_CATALOG } from "./openclaw.js";
-import type { AgentProviderId, ModelOption, ProviderCatalog } from "./types.js";
+import type { AgentProviderId, LiveModel, ModelOption, ProviderCatalog } from "./types.js";
 
 export type {
   AgentProviderId,
+  LiveModel,
   ModelOption,
   OptionChoice,
   OptionField,
@@ -130,17 +131,35 @@ export function resolveModelId(
 }
 
 /**
- * Merge a list of live model ids (from a provider's list-models API) into the
- * hardcoded baseline. Live ids not present in the baseline are appended;
+ * Merge a list of live models (from a provider's list-models API) into the
+ * hardcoded baseline. Live entries not present in the baseline are appended;
  * existing entries are preserved so we don't lose labels/family metadata.
+ *
+ * Live additions are labeled with the provider's display name when available
+ * and assigned to a baseline family when their id contains one (longest match
+ * wins), so they slot into the UI's grouped dropdown instead of each forming
+ * a single-model group.
  */
-export function mergeLiveModels(catalog: ProviderCatalog, liveIds: string[]): ProviderCatalog {
+export function mergeLiveModels(
+  catalog: ProviderCatalog,
+  live: Array<string | LiveModel>,
+): ProviderCatalog {
   const known = new Set(catalog.models.map((m) => m.id));
+  const families = [...new Set(catalog.models.map((m) => m.family))]
+    .filter((f): f is string => Boolean(f))
+    .sort((a, b) => b.length - a.length);
   const additions: ModelOption[] = [];
-  for (const id of liveIds) {
-    if (!id || known.has(id)) continue;
-    known.add(id);
-    additions.push({ id, label: id, source: "live" });
+  for (const entry of live) {
+    const model = typeof entry === "string" ? { id: entry } : entry;
+    if (!model.id || known.has(model.id)) continue;
+    known.add(model.id);
+    const family = families.find((f) => model.id.includes(f));
+    additions.push({
+      id: model.id,
+      label: model.displayName || model.id,
+      ...(family ? { family } : {}),
+      source: "live",
+    });
   }
   if (additions.length === 0) return catalog;
   return {

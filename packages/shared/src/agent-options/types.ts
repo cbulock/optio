@@ -40,6 +40,15 @@ export interface ModelOption {
   source?: "baseline" | "live";
 }
 
+/**
+ * A model entry returned by a provider's list-models API. `displayName` is
+ * the provider's human-readable label (e.g. Anthropic's `display_name`).
+ */
+export interface LiveModel {
+  id: string;
+  displayName?: string;
+}
+
 export interface OptionChoice {
   value: string;
   label: string;
