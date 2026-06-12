@@ -49,23 +49,17 @@ const PUBLIC_ROUTES = new Set([
   "/api/health",
   "/api/setup/status",
   "/api/notifications/vapid-public-key",
+  "/api/internal/git-credentials",
+  "/api/internal/persistent-agents",
 ]);
 
 /**
  * Prefix-matched routes that are always public.
  *
- * /api/internal/* routes are called by agent pods which don't have session
- * cookies. They authenticate via HMAC-SHA256 signatures verified in the
- * route handler itself (see hmac-auth-service.ts). The Helm ingress also
- * blocks /api/internal/* from public traffic as defense in depth.
+ * Public prefix routes must be intentionally unauthenticated. Outbound
+ * webhook management lives under /api/webhooks and must remain protected.
  */
-const PUBLIC_PREFIXES = [
-  "/api/webhooks/",
-  "/api/hooks/",
-  "/ws/",
-  "/api/internal/git-credentials",
-  "/docs",
-];
+const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws/", "/docs"];
 
 /**
  * Auth routes that are public (OAuth login/callback flows only).
@@ -181,18 +175,22 @@ async function authPlugin(app: FastifyInstance) {
     }
 
     // Resolve workspace context
-    const headerWorkspaceId =
+    const requestedWorkspaceId =
       (req.headers[WORKSPACE_HEADER] as string) ??
       parseCookie(req.headers.cookie, "optio_workspace");
-    const workspaceId = headerWorkspaceId || user.workspaceId;
+    const workspaceId = requestedWorkspaceId || user.workspaceId;
 
     if (workspaceId) {
       const role = await getUserRole(workspaceId, user.id);
       if (role) {
         user.workspaceId = workspaceId;
         user.workspaceRole = role;
+      } else if (requestedWorkspaceId) {
+        return reply.status(403).send({
+          error: "Forbidden: not a member of requested workspace",
+        });
       } else {
-        // User not a member of the requested workspace — fall back to default
+        // Saved default workspace is missing/stale — fall back to a valid default.
         const defaultWsId = await ensureUserHasWorkspace(user.id);
         const defaultRole = await getUserRole(defaultWsId, user.id);
         user.workspaceId = defaultWsId;
