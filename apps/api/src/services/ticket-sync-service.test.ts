@@ -65,6 +65,7 @@ import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
+import { getRepoByUrl } from "./repo-service.js";
 import { syncAllTickets } from "./ticket-sync-service.js";
 import { logger } from "../logger.js";
 
@@ -160,6 +161,80 @@ describe("ticket-sync-service", () => {
     expect(taskService.transitionTask).toHaveBeenCalledWith("task-1", "queued", "ticket_sync");
     expect(taskQueue.add).toHaveBeenCalled();
     expect(mockProvider.addComment).toHaveBeenCalled();
+  });
+
+  it("stamps created tasks with the repo's workspaceId (issue #544)", async () => {
+    mockDbSelect([
+      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+    ]);
+
+    // Repo is configured in a workspace — webhook/poll-created tasks must
+    // inherit it or the workspace-scoped UI filters them out.
+    vi.mocked(getRepoByUrl).mockResolvedValueOnce({
+      id: "repo-1",
+      workspaceId: "ws-1",
+      defaultAgentType: null,
+    } as any);
+
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([
+        {
+          title: "Labeled issue",
+          body: "Body",
+          source: "github",
+          externalId: "321",
+          url: "https://github.com/o/r/issues/321",
+          labels: ["optio"],
+          repo: null,
+        },
+      ]),
+      fetchTicketComments: vi.fn().mockResolvedValue([]),
+      addComment: vi.fn().mockResolvedValue(undefined),
+    } as any);
+
+    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-1", maxRetries: 3 } as any);
+
+    await syncAllTickets();
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoUrl: "https://github.com/o/r",
+        workspaceId: "ws-1",
+      }),
+    );
+  });
+
+  it("falls back to a NULL workspaceId when the repo is not configured", async () => {
+    mockDbSelect([
+      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+    ]);
+
+    // getRepoByUrl default mock resolves null (unknown repo)
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([
+        {
+          title: "Unknown repo issue",
+          body: "",
+          source: "github",
+          externalId: "654",
+          url: "",
+          labels: [],
+          repo: null,
+        },
+      ]),
+      fetchTicketComments: vi.fn().mockResolvedValue([]),
+      addComment: vi.fn().mockResolvedValue(undefined),
+    } as any);
+
+    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-2", maxRetries: 3 } as any);
+
+    await syncAllTickets();
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: null }),
+    );
   });
 
   it("skips tickets that already have tasks", async () => {
