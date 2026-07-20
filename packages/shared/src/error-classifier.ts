@@ -116,6 +116,31 @@ const ERROR_PATTERNS: Array<{
       retryable: true,
     }),
   },
+  // Must precede the credential-name patterns (ANTHROPIC_API_KEY, OPENAI_API_KEY, …)
+  // so a decrypt failure mentioning a secret's name isn't misclassified as a
+  // missing key. Matches both the wrapped message from secret-service.decrypt()
+  // and Node's raw AES-GCM auth failure in case it surfaces unwrapped.
+  {
+    pattern:
+      /failed to decrypt stored secret(?: "([^"]+)")?|unsupported state or unable to authenticate data/i,
+    classify: (match) => {
+      const name = match[1];
+      return {
+        category: "auth",
+        title: name ? `Cannot decrypt secret: ${name}` : "Cannot decrypt stored secret",
+        description:
+          `A stored secret${name ? ` ("${name}")` : ""} could not be decrypted. This almost always ` +
+          "means the encryption key (OPTIO_ENCRYPTION_KEY) changed after the secret was saved — " +
+          "for example, a redeploy generated a fresh key — so decryption fails for every " +
+          "previously stored credential.",
+        remedy:
+          "Re-enter the affected credentials under Secrets (or re-run the setup wizard), or " +
+          "restore the original encryption key (Helm value encryption.key) and redeploy. " +
+          "Retrying without doing one of these will keep failing.",
+        retryable: false,
+      };
+    },
+  },
   {
     pattern:
       /OAuth token has expired|authentication_failed|token.*expired|401.*authentication|pre-flight validation/i,

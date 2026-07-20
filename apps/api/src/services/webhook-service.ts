@@ -61,6 +61,7 @@ function decryptWebhookRow(row: typeof webhooks.$inferSelect): WebhookRecord {
         authTag: row.secretAuthTag,
       },
       aad,
+      `webhook ${row.id} secret`,
     );
   }
   return {
