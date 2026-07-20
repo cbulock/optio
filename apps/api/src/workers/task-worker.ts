@@ -37,6 +37,7 @@ import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
+import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
 import * as messageService from "../services/task-message-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { logger } from "../logger.js";
@@ -820,6 +821,11 @@ export function startTaskWorker() {
           resetWorktree: shouldResetWorktree,
         });
 
+        // Register the live exec session so a user cancel can abort the
+        // stream (and kill the in-pod agent) instead of letting the agent
+        // run to completion in the background (#549).
+        registerActiveExec(taskId, execSession);
+
         // Claude runs with `--input-format stream-json`, which means the initial
         // user message must come in over stdin — the -p/--print positional arg is
         // ignored in that mode. The pipe buffer holds this line until bash finishes
@@ -1423,6 +1429,9 @@ export function startTaskWorker() {
         }
         throw err;
       } finally {
+        // Drop the exec session from the cancellation registry (no-op if it
+        // was already aborted by a cancel or never registered).
+        unregisterActiveExec(taskId);
         // Release the task slot on the repo pod
         if (repoPodId) {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});

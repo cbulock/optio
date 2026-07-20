@@ -366,6 +366,18 @@ export async function transitionTask(
       .catch((err) => logger.warn({ err, taskId: id }, "Failed to cascade failure to dependents"));
   }
 
+  // A cancelled task must actually stop: kill the in-pod agent process and
+  // abort the server-side exec stream so it stops burning tokens (#549).
+  // Only running tasks can have a live agent. Fire-and-forget — post-exec
+  // paths are guarded on task state, so a late kill cannot corrupt anything.
+  if (toState === TaskState.CANCELLED && currentState === TaskState.RUNNING) {
+    import("./task-cancellation-service.js")
+      .then(({ terminateTaskExecution }) => terminateTaskExecution(id))
+      .catch((err) =>
+        logger.warn({ err, taskId: id }, "Failed to terminate execution for cancelled task"),
+      );
+  }
+
   // Wake the reconciler. Every state change is a signal it may want to act
   // (capacity opened up, PR-related state changed, dependency cascade, etc).
   import("./reconcile-queue.js")
@@ -435,6 +447,15 @@ export async function updateTaskContainer(id: string, containerId: string) {
 }
 
 export async function updateTaskPr(id: string, prUrl: string) {
+  // A cancelled task must never adopt a PR. The agent can still emit a PR
+  // URL after the user cancels (late exec output before the kill lands, or
+  // an API-fallback detection); dropping the write keeps cancelled tasks
+  // out of the PR pipeline entirely (#549).
+  const current = await getTask(id);
+  if (current?.state === TaskState.CANCELLED) {
+    logger.info({ taskId: id, prUrl }, "Ignoring PR URL for cancelled task");
+    return;
+  }
   const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
   const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : undefined;
   await db
