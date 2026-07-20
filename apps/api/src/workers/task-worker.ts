@@ -21,7 +21,12 @@ import { parseCopilotEvent } from "../services/copilot-event-parser.js";
 import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
 import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
-import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
+import {
+  checkExistingPr,
+  resolveDetectedPrUrl,
+  verifyTaskPr,
+  type ExistingPr,
+} from "../services/pr-detection-service.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { eq, sql } from "drizzle-orm";
@@ -1145,7 +1150,45 @@ export function startTaskWorker() {
             fallbackPrUrl = undefined;
           }
         }
-        const detectedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl;
+        const scrapedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl || undefined;
+
+        // A `/pull/N` URL in agent output is not proof that a PR was opened —
+        // it may be an example URL echoed from the prompt (issue #531). The
+        // task branch is deterministic (`optio/task-{id}`), so ask the git
+        // platform whether an open PR actually exists for it before trusting
+        // any scraped URL. If the platform can't be consulted (no token, API
+        // error), fall back to the previous trust-the-logs behavior.
+        let detectedPrUrl = scrapedPrUrl;
+        // Set when the platform authoritatively reported no open PR for the
+        // task branch — lets later API-fallback checks skip a redundant call.
+        let prKnownAbsent = false;
+        if (scrapedPrUrl && !isReviewTask) {
+          const verification = await verifyTaskPr(task.repoUrl, taskId, taskWorkspaceId);
+          const resolved = resolveDetectedPrUrl(scrapedPrUrl, verification);
+          detectedPrUrl = resolved.url;
+          if (verification.status === "no_pr") {
+            prKnownAbsent = true;
+            log.warn(
+              { rejectedPrUrl: resolved.rejectedUrl },
+              "Ignoring PR URL from agent output — platform reports no open PR for the task branch",
+            );
+            if (taskAfterExec?.prUrl) {
+              // A bogus URL was already persisted during streaming — clear it
+              // so the task doesn't advertise a PR that was never opened.
+              await taskService.clearTaskPr(taskId);
+            }
+          } else if (verification.status === "unavailable") {
+            log.info(
+              { prUrl: scrapedPrUrl, reason: verification.reason },
+              "PR verification unavailable — falling back to PR URL from agent output",
+            );
+          } else if (detectedPrUrl !== scrapedPrUrl) {
+            log.info(
+              { scrapedPrUrl, verifiedPrUrl: detectedPrUrl },
+              "Using canonical PR URL from platform instead of URL scraped from agent output",
+            );
+          }
+        }
 
         if (!sessionId && !isReviewTask) {
           // Agent never started — no session ID means no agent output was produced.
@@ -1200,10 +1243,12 @@ export function startTaskWorker() {
             // check the API as a fallback — the agent may have pushed a PR
             // that wasn't captured in log output.
             let apiFallbackPr: ExistingPr | null = null;
-            try {
-              apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
-            } catch {
-              // Non-fatal — proceed with escalation
+            if (!prKnownAbsent) {
+              try {
+                apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
+              } catch {
+                // Non-fatal — proceed with escalation
+              }
             }
 
             if (apiFallbackPr) {
@@ -1245,7 +1290,7 @@ export function startTaskWorker() {
           // Log-based PR detection can miss URLs (e.g. agent created a PR but
           // the URL wasn't in stdout, or repo validation filtered it out).
           let apiFallbackPr: ExistingPr | null = null;
-          if (!isReviewTask) {
+          if (!isReviewTask && !prKnownAbsent) {
             try {
               apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
             } catch {
