@@ -1147,7 +1147,14 @@ export function startTaskWorker() {
         }
         const detectedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl;
 
-        if (!sessionId && !isReviewTask) {
+        const outcome = classifyRunOutcome({
+          success: result.success,
+          isReviewTask,
+          sessionId,
+          detectedPrUrl,
+        });
+
+        if (outcome === "no_output") {
           // Agent never started — no session ID means no agent output was produced.
           await repoPool.updateWorktreeState(taskId, "dirty");
           await taskService.transitionTask(
@@ -1157,7 +1164,7 @@ export function startTaskWorker() {
             "Agent process exited without producing any output",
           );
           log.warn("Agent exited without output — no session ID captured");
-        } else if (detectedPrUrl && !isReviewTask) {
+        } else if (outcome === "pr_opened" && detectedPrUrl) {
           // PR exists — go to pr_opened regardless of exit code.
           if (detectedPrUrl !== taskAfterExec?.prUrl) {
             await taskService.updateTaskPr(taskId, detectedPrUrl);
@@ -1171,11 +1178,15 @@ export function startTaskWorker() {
             detectedPrUrl,
           );
           log.info({ prUrl: detectedPrUrl }, "PR opened");
-        } else if (result.success || isReviewTask) {
+        } else if (outcome === "success") {
           // External PR reviews no longer run here — they execute under
           // pr_review_runs via pr-review-worker.ts. Subtask reviews
           // (`taskType === "review"`) still flow through this path and
           // their result lands in the parent coding task's comments.
+          // Failed review runs (e.g. terminal API errors, issue #552) take the
+          // failure branch below like any other run — they must not be marked
+          // completed, which would both show a false green state and count as
+          // an approval for auto-merge in subtask-service.
 
           // Planning mode: agent finished planning — wait for human approval
           if (isPlanningRun && !isReviewTask) {
@@ -1798,6 +1809,29 @@ export function buildAgentCommand(
  * opening one, the work didn't ship — the user should be notified so they can
  * resume or restart the agent.
  */
+/**
+ * Classify how a finished agent run should be handled.
+ *
+ * - "no_output"  — agent produced no session/output at all (non-review only)
+ * - "pr_opened"  — a PR was detected (non-review only; reviews never own a PR)
+ * - "success"    — agent finished successfully
+ * - "failure"    — agent failed; applies to review subtasks too. A review run
+ *   that ends in a terminal agent error (e.g. "API Error: Usage credits
+ *   required", issue #552) must be failed — previously reviews unconditionally
+ *   completed, hiding the error behind a green state and counting as an
+ *   approval for auto-merge.
+ */
+export function classifyRunOutcome(opts: {
+  success: boolean;
+  isReviewTask: boolean;
+  sessionId: string | undefined;
+  detectedPrUrl: string | undefined | null;
+}): "no_output" | "pr_opened" | "success" | "failure" {
+  if (!opts.sessionId && !opts.isReviewTask) return "no_output";
+  if (opts.detectedPrUrl && !opts.isReviewTask) return "pr_opened";
+  return opts.success ? "success" : "failure";
+}
+
 export function shouldEscalateNoPr(opts: {
   success: boolean;
   isReviewTask: boolean;
