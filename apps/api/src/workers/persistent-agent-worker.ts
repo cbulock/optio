@@ -315,7 +315,10 @@ export function startPersistentAgentWorker() {
             claimedAgent.workspaceId ?? null,
           ).catch(() => null)) as string | null) ?? "api-key";
 
-        const apiUrl = process.env.PUBLIC_URL || process.env.OPTIO_API_URL || "";
+        const apiUrl =
+          process.env.OPTIO_API_INTERNAL_URL ??
+          process.env.OPTIO_API_URL ??
+          `http://localhost:${process.env.API_PORT ?? "4000"}`;
         const env: Record<string, string> = {
           ...resolvedSecrets,
           OPTIO_PROMPT: renderedPrompt,

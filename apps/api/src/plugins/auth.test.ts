@@ -11,13 +11,21 @@ vi.mock("../services/oauth/index.js", () => ({
   getOAuthProvider: () => undefined,
 }));
 
+const mockValidateSession = vi.fn();
 vi.mock("../services/session-service.js", () => ({
-  validateSession: () => null,
+  validateSession: (...args: unknown[]) => mockValidateSession(...args),
 }));
 
+const mockValidateApiKey = vi.fn();
+vi.mock("../services/api-key-service.js", () => ({
+  validateApiKey: (...args: unknown[]) => mockValidateApiKey(...args),
+}));
+
+const mockGetUserRole = vi.fn();
+const mockEnsureUserHasWorkspace = vi.fn();
 vi.mock("../services/workspace-service.js", () => ({
-  getUserRole: () => null,
-  ensureUserHasWorkspace: () => "ws-1",
+  getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
+  ensureUserHasWorkspace: (...args: unknown[]) => mockEnsureUserHasWorkspace(...args),
 }));
 
 const mockListSecrets = vi.fn();
@@ -25,7 +33,12 @@ vi.mock("../services/secret-service.js", () => ({
   listSecrets: (...args: unknown[]) => mockListSecrets(...args),
 }));
 
-import { requireRole, isSetupComplete, resetSetupCompleteCache, isPublicRoute } from "./auth.js";
+import authPlugin, {
+  requireRole,
+  isSetupComplete,
+  resetSetupCompleteCache,
+  isPublicRoute,
+} from "./auth.js";
 
 // ─── Helpers ───
 
@@ -159,6 +172,79 @@ describe("requireRole", () => {
   });
 });
 
+describe("authPlugin workspace context", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authDisabled = false;
+    mockValidateSession.mockResolvedValue(makeUser(null));
+    mockValidateApiKey.mockResolvedValue(null);
+    mockEnsureUserHasWorkspace.mockResolvedValue("ws-1");
+  });
+
+  async function buildAuthApp(): Promise<FastifyInstance> {
+    const app = Fastify({ logger: false });
+    await app.register(authPlugin);
+    app.get("/protected", async (req) => ({ user: req.user }));
+    await app.ready();
+    return app;
+  }
+
+  it("rejects an explicit workspace header when the user is not a member", async () => {
+    mockGetUserRole.mockResolvedValue(null);
+    const app = await buildAuthApp();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/protected",
+      headers: {
+        authorization: "Bearer session-token",
+        "x-workspace-id": "ws-other",
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("Forbidden: not a member of requested workspace");
+    expect(mockEnsureUserHasWorkspace).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("uses an explicit workspace header when the user is a member", async () => {
+    mockGetUserRole.mockResolvedValue("viewer");
+    const app = await buildAuthApp();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/protected",
+      headers: {
+        authorization: "Bearer session-token",
+        "x-workspace-id": "ws-2",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.workspaceId).toBe("ws-2");
+    expect(res.json().user.workspaceRole).toBe("viewer");
+    await app.close();
+  });
+
+  it("repairs a stale saved default workspace when no explicit workspace was requested", async () => {
+    mockValidateSession.mockResolvedValue({ ...makeUser(null), workspaceId: "ws-stale" });
+    mockGetUserRole.mockResolvedValueOnce(null).mockResolvedValueOnce("member");
+    const app = await buildAuthApp();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/protected",
+      headers: { authorization: "Bearer session-token" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.workspaceId).toBe("ws-1");
+    expect(res.json().user.workspaceRole).toBe("member");
+    await app.close();
+  });
+});
+
 describe("isPublicRoute", () => {
   // ─── Non-auth public routes ───
 
@@ -170,8 +256,14 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("/api/setup/status")).toBe(true);
   });
 
-  it("allows /api/webhooks/ prefix", () => {
-    expect(isPublicRoute("/api/webhooks/some-id")).toBe(true);
+  it("blocks outbound /api/webhooks routes", () => {
+    expect(isPublicRoute("/api/webhooks")).toBe(false);
+    expect(isPublicRoute("/api/webhooks/some-id")).toBe(false);
+    expect(isPublicRoute("/api/webhooks/some-id/deliveries")).toBe(false);
+  });
+
+  it("allows inbound /api/hooks/ prefix", () => {
+    expect(isPublicRoute("/api/hooks/github-push")).toBe(true);
   });
 
   it("allows /ws/ prefix", () => {
@@ -180,6 +272,21 @@ describe("isPublicRoute", () => {
 
   it("allows /api/internal/git-credentials", () => {
     expect(isPublicRoute("/api/internal/git-credentials")).toBe(true);
+  });
+
+  it("allows persistent agent internal routes", () => {
+    expect(isPublicRoute("/api/internal/persistent-agents")).toBe(true);
+    expect(isPublicRoute("/api/internal/persistent-agents/send")).toBe(true);
+    expect(isPublicRoute("/api/internal/persistent-agents/inbox?limit=20")).toBe(true);
+  });
+
+  it("blocks similar /api/internal/git-credentials paths", () => {
+    expect(isPublicRoute("/api/internal/git-credentials-extra")).toBe(false);
+    expect(isPublicRoute("/api/internal/git-credentials/extra")).toBe(false);
+  });
+
+  it("blocks similar persistent agent internal routes", () => {
+    expect(isPublicRoute("/api/internal/persistent-agents-extra")).toBe(false);
   });
 
   // ─── Public auth routes (OAuth flow) ───

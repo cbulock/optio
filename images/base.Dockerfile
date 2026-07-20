@@ -51,6 +51,9 @@ RUN corepack enable && corepack prepare pnpm@10 --activate
 # Claude Code
 RUN npm install -g @anthropic-ai/claude-code
 
+# OpenAI Codex CLI
+RUN npm install -g @openai/codex
+
 # GitHub Copilot CLI (pinned + best-effort — package may be temporarily unavailable)
 RUN npm install -g @github/copilot@1.0.20 || echo "WARN: @github/copilot install failed; copilot agent will not be available in this image"
 

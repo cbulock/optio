@@ -157,6 +157,9 @@ export async function syncAllTickets(): Promise<number> {
           ticketSource: ticket.source,
           ticketExternalId: ticket.externalId,
           metadata: { ticketUrl: ticket.url },
+          // Inherit the repo's workspace so webhook/poll-created tasks are
+          // visible in the (workspace-scoped) UI — see issue #544.
+          workspaceId: repoConfig?.workspaceId ?? null,
         });
 
         await taskService.transitionTask(task.id, TaskState.QUEUED, "ticket_sync");

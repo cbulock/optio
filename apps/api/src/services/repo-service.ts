@@ -87,6 +87,7 @@ function decryptRepoRow(row: typeof repos.$inferSelect): RepoRecord {
         authTag: row.slackWebhookUrlAuthTag,
       },
       aad,
+      `repo ${row.id} slackWebhookUrl`,
     );
   }
   const {

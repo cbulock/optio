@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
+  classifyRunOutcome,
   inferExitCode,
   shouldEscalateNoPr,
 } from "./task-worker.js";
+import { ClaudeCodeAdapter } from "@optio/agent-adapters";
 
 describe("buildAgentCommand", () => {
   describe("claude-code agent", () => {
@@ -438,5 +440,90 @@ describe("shouldEscalateNoPr", () => {
         detectedPrUrl: "https://github.com/org/repo/pull/1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("classifyRunOutcome", () => {
+  const defaults = {
+    success: true,
+    isReviewTask: false,
+    sessionId: "sess-1" as string | undefined,
+    detectedPrUrl: undefined as string | undefined | null,
+  };
+
+  it("returns no_output when a non-review run produced no session", () => {
+    expect(classifyRunOutcome({ ...defaults, sessionId: undefined })).toBe("no_output");
+  });
+
+  it("returns pr_opened when a PR was detected on a non-review run", () => {
+    expect(
+      classifyRunOutcome({ ...defaults, detectedPrUrl: "https://github.com/org/repo/pull/42" }),
+    ).toBe("pr_opened");
+  });
+
+  it("never returns pr_opened for review tasks", () => {
+    expect(
+      classifyRunOutcome({
+        ...defaults,
+        isReviewTask: true,
+        detectedPrUrl: "https://github.com/org/repo/pull/42",
+      }),
+    ).toBe("success");
+  });
+
+  it("returns success for a successful run", () => {
+    expect(classifyRunOutcome(defaults)).toBe("success");
+  });
+
+  it("returns failure for a failed non-review run", () => {
+    expect(classifyRunOutcome({ ...defaults, success: false })).toBe("failure");
+  });
+
+  it("returns failure for a failed review run (issue #552 regression)", () => {
+    // Previously review tasks were unconditionally routed to the success
+    // branch, marking API-error review runs as completed.
+    expect(classifyRunOutcome({ ...defaults, success: false, isReviewTask: true })).toBe("failure");
+  });
+
+  it("returns success for a successful review run", () => {
+    expect(classifyRunOutcome({ ...defaults, isReviewTask: true })).toBe("success");
+  });
+
+  it("fails the reporter's exact scenario: review run, API error result event, exit 0", () => {
+    // Issue #552: Claude Code hit "API Error: Usage credits required for 1M
+    // context", emitted an is_error result event, and exited 0. The task was
+    // wrongly marked Done (agent success) with the error in the message.
+    const apiError =
+      "API Error: Usage credits required for 1M context · turn on usage credits at claude.ai/settings/usage, or use --model to switch to standard context";
+    const logs = [
+      '{"type":"system","subtype":"init","session_id":"s-1","model":"claude-sonnet-4-6[1m]","tools":[]}',
+      JSON.stringify({
+        type: "assistant",
+        session_id: "s-1",
+        message: { content: [{ type: "text", text: apiError }] },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: apiError,
+        num_turns: 1,
+        duration_ms: 500,
+        session_id: "s-1",
+      }),
+    ].join("\n");
+
+    const exitCode = inferExitCode("claude-code", logs);
+    const result = new ClaudeCodeAdapter().parseResult(exitCode, logs);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Usage credits required for 1M context");
+
+    const outcome = classifyRunOutcome({
+      success: result.success,
+      isReviewTask: true,
+      sessionId: "s-1",
+      detectedPrUrl: undefined,
+    });
+    expect(outcome).toBe("failure");
   });
 });

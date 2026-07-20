@@ -29,6 +29,43 @@ describe("classifyError", () => {
     expect(result.title).toContain("ANTHROPIC_API_KEY");
   });
 
+  it("classifies wrapped decrypt failure with secret name", () => {
+    const result = classifyError(
+      'Failed to decrypt stored secret "SLACK_TOKEN" — the encryption key (OPTIO_ENCRYPTION_KEY) ' +
+        "has likely changed since it was saved. Re-enter the credential, or restore the original " +
+        "encryption key. (Unsupported state or unable to authenticate data)",
+    );
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt secret: SLACK_TOKEN");
+    expect(result.remedy).toContain("encryption key");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies wrapped decrypt failure without secret name", () => {
+    const result = classifyError("Failed to decrypt stored secret — the encryption key changed");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt stored secret");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies raw GCM auth failure (unwrapped)", () => {
+    const result = classifyError("Error: Unsupported state or unable to authenticate data");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt stored secret");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("prefers decrypt classification over credential-name patterns", () => {
+    // The message mentions ANTHROPIC_API_KEY, but the root cause is a decrypt
+    // failure — must not be classified as "Anthropic API key missing".
+    const result = classifyError(
+      'Failed to decrypt stored secret "ANTHROPIC_API_KEY" — the encryption key ' +
+        "(OPTIO_ENCRYPTION_KEY) has likely changed since it was saved.",
+    );
+    expect(result.title).toBe("Cannot decrypt secret: ANTHROPIC_API_KEY");
+    expect(result.retryable).toBe(false);
+  });
+
   it("classifies invalid state transition", () => {
     const result = classifyError(
       "InvalidTransitionError: Invalid state transition: failed -> provisioning",

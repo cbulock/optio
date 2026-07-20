@@ -5,6 +5,7 @@ dist/
 .next/
 .env
 .env.local
+.optio-run-token
 *.tsbuildinfo
 coverage/
 coverage-report.md
@@ -14,6 +15,7 @@ apps/api/.env
 .claude/
 .tool-versions
 .values.local.yaml
+helm/optio/values-prod.yaml
 .worktrees/
 /issues/
 

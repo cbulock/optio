@@ -322,14 +322,94 @@ describe("ClaudeCodeAdapter", () => {
     it("extracts error from result event with is_error=true when exitCode is non-zero", () => {
       const logs = '{"type":"result","is_error":true,"result":"API rate limit exceeded"}';
       const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
       expect(result.error).toBe("API rate limit exceeded");
     });
 
-    it("does NOT extract error from is_error result when exitCode is 0", () => {
+    it("fails on an is_error result event even when exitCode is 0 (issue #552)", () => {
+      // Claude Code in stream-json mode exits 0 after stdin closes, so the
+      // process exit code cannot be trusted — the result event is authoritative.
       const logs = '{"type":"result","is_error":true,"result":"API rate limit exceeded"}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("API rate limit exceeded");
+      expect(result.summary).toBe("Agent error: API rate limit exceeded");
+    });
+
+    it("reproduces issue #552: usage-credit API error with exit 0 and no real result", () => {
+      const apiError =
+        "API Error: Usage credits required for 1M context · turn on usage credits at claude.ai/settings/usage, or use --model to switch to standard context";
+      const logs = [
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6[1m]","tools":[]}',
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: apiError }] },
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          result: apiError,
+          num_turns: 1,
+          duration_ms: 500,
+        }),
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Usage credits required for 1M context");
+      expect(result.summary).toMatch(/^Agent error: API Error: Usage credits required/);
+    });
+
+    it("fails on an is_error result event with no result text, using subtype", () => {
+      const logs = '{"type":"result","subtype":"error_during_execution","is_error":true}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Agent reported an error result (error_during_execution)");
+    });
+
+    it("fails when an API error is emitted and no result event follows (crash)", () => {
+      const logs = [
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6","tools":[]}',
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "API Error: 500 Internal Server Error" }] },
+        }),
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("API Error: 500 Internal Server Error");
+    });
+
+    it("still succeeds when a transient API error is recovered and a real result follows", () => {
+      const logs = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "API Error: 529 Overloaded (retrying)" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Finished the review." }] },
+        }),
+        '{"type":"result","is_error":false,"result":"Review complete: LGTM"}',
+      ].join("\n");
       const result = adapter.parseResult(0, logs);
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
+      expect(result.summary).toBe("Review complete: LGTM");
+    });
+
+    it("does not treat ordinary assistant text mentioning errors as failure", () => {
+      const logs = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "The API Error handling in foo.ts looks fine." }],
+          },
+        }),
+        '{"type":"result","is_error":false,"result":"All good"}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(true);
     });
 
     it("falls back to Exit code: N when no structured error", () => {

@@ -44,6 +44,34 @@ const TERMINATION_GRACE_PERIOD = parseIntEnv("OPTIO_TERMINATION_GRACE_PERIOD_SEC
 const POD_READY_TIMEOUT_MS = parseIntEnv("OPTIO_POD_READY_TIMEOUT_MS", 300000);
 const POD_READY_POLL_MS = 1_000;
 
+export const WORKLOAD_ALLOWED_CAPABILITIES = new Set([
+  "AUDIT_WRITE",
+  "CHOWN",
+  "DAC_OVERRIDE",
+  "FOWNER",
+  "FSETID",
+  "KILL",
+  "MKNOD",
+  "NET_ADMIN",
+  "NET_BIND_SERVICE",
+  "NET_RAW",
+  "SETFCAP",
+  "SETGID",
+  "SETPCAP",
+  "SETUID",
+  "SYS_CHROOT",
+]);
+
+export function validateWorkloadCapabilities(capabilities: string[]): void {
+  const disallowed = capabilities.filter((cap) => !WORKLOAD_ALLOWED_CAPABILITIES.has(cap));
+  if (disallowed.length > 0) {
+    throw new Error(
+      `Disallowed container capabilities requested: ${disallowed.join(", ")}. ` +
+        `Allowed capabilities: ${[...WORKLOAD_ALLOWED_CAPABILITIES].join(", ")}`,
+    );
+  }
+}
+
 export class K8sWorkloadManager {
   private kubeConfig: KubeConfig;
   private appsApi: AppsV1Api;
@@ -424,7 +452,7 @@ export class K8sWorkloadManager {
 
   private async ensureHeadlessService(
     name: string,
-    podLabels: Record<string, string>,
+    _podLabels: Record<string, string>,
   ): Promise<void> {
     try {
       await this.coreApi.readNamespacedService({ name, namespace: this.namespace });
@@ -506,9 +534,12 @@ export class K8sWorkloadManager {
     const caps = new V1Capabilities();
     caps.drop = ["ALL"];
     if (spec.capabilities && spec.capabilities.length > 0) {
+      validateWorkloadCapabilities(spec.capabilities);
       caps.add = spec.capabilities;
     }
     secCtx.capabilities = caps;
+    secCtx.allowPrivilegeEscalation = false;
+    secCtx.seccompProfile = { type: "RuntimeDefault" };
     container.securityContext = secCtx;
 
     // Build volumes and mounts
