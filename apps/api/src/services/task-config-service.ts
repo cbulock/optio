@@ -159,6 +159,17 @@ export async function instantiateTask(
 
   const agentType = effectiveAgentType ?? "claude-code";
 
+  // Resolve the workspace: prefer the config's own workspace, falling back to
+  // the repo's workspace so trigger-spawned tasks from legacy (NULL-workspace)
+  // configs remain visible in the workspace-scoped UI — see issue #544.
+  let workspaceId = config.workspaceId ?? null;
+  if (!workspaceId) {
+    // Dynamic import to avoid a cycle: repo-service → services graph.
+    const { getRepoByUrl } = await import("./repo-service.js");
+    const repo = await getRepoByUrl(config.repoUrl).catch(() => null);
+    workspaceId = repo?.workspaceId ?? null;
+  }
+
   const task = await taskService.createTask({
     title: effectiveTitle,
     prompt: effectivePrompt,
@@ -168,7 +179,7 @@ export async function instantiateTask(
     maxRetries: config.maxRetries,
     priority: config.priority,
     createdBy: config.createdBy ?? undefined,
-    workspaceId: config.workspaceId ?? undefined,
+    workspaceId,
     metadata: {
       taskConfigId: config.id,
       taskConfigName: config.name,
