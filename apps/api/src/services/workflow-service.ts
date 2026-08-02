@@ -455,6 +455,13 @@ export async function retryWorkflowRun(id: string) {
 
 /**
  * Cancel a running workflow run by transitioning it to failed.
+ *
+ * Also exhausts the run's retry budget (retryCount = workflow.maxRetries):
+ * the reconciler's decideFailed auto-retries any FAILED run with budget left
+ * and cannot tell a user cancellation from an agent failure — without this a
+ * cancelled run silently reruns. An explicit user retry via retryWorkflowRun
+ * still works (it does not consult maxRetries). The reconciler's
+ * control_intent=cancel path stamps the same shape.
  */
 export async function cancelWorkflowRun(id: string) {
   const run = await getWorkflowRun(id);
@@ -467,12 +474,15 @@ export async function cancelWorkflowRun(id: string) {
 
   transitionWorkflowRun(currentState, WorkflowRunState.FAILED);
 
+  const workflow = await getWorkflow(run.workflowId);
+
   const [updated] = await db
     .update(workflowRuns)
     .set({
       state: WorkflowRunState.FAILED,
       errorMessage: "Cancelled by user",
       finishedAt: new Date(),
+      retryCount: Math.max(run.retryCount ?? 0, workflow?.maxRetries ?? 0),
       updatedAt: new Date(),
     })
     .where(eq(workflowRuns.id, id))
