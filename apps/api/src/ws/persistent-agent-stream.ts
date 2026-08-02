@@ -8,7 +8,7 @@ import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import {
-  getPersistentAgent,
+  getPersistentAgentUnscoped,
   listPersistentAgentTurns,
   listTurnLogs,
 } from "../services/persistent-agent-service.js";
@@ -33,7 +33,7 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
     }
 
     const { agentId } = z.object({ agentId: z.string() }).parse(req.params);
-    const agent = await getPersistentAgent(agentId);
+    const agent = await getPersistentAgentUnscoped(agentId);
     if (!agent) {
       socket.close(4404, "Persistent agent not found");
       releaseConnection(clientIp);

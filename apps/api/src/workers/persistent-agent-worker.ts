@@ -211,7 +211,7 @@ export function startPersistentAgentWorker() {
       const log = logger.child({ agentId, jobId: job.id, persistentAgent: true });
 
       // 1. Verify agent is in QUEUED state and claim by transitioning to PROVISIONING.
-      const agent = await paService.getPersistentAgent(agentId);
+      const agent = await paService.getPersistentAgentUnscoped(agentId);
       if (!agent) {
         log.warn("Persistent agent not found, skipping job");
         return;
@@ -238,7 +238,7 @@ export function startPersistentAgentWorker() {
       }
 
       // Re-fetch to get the new updated_at for downstream CAS.
-      const claimedAgent = await paService.getPersistentAgent(agentId);
+      const claimedAgent = await paService.getPersistentAgentUnscoped(agentId);
       if (!claimedAgent) return;
 
       let turn: { id: string; turnNumber: number } | null = null;
@@ -290,7 +290,7 @@ export function startPersistentAgentWorker() {
         }
 
         // Transition PROVISIONING → RUNNING (CAS).
-        const provAgent = await paService.getPersistentAgent(agentId);
+        const provAgent = await paService.getPersistentAgentUnscoped(agentId);
         if (!provAgent) throw new Error("Agent disappeared during provisioning");
         await paService.transitionPersistentAgentState(
           agentId,
@@ -461,7 +461,7 @@ export function startPersistentAgentWorker() {
 
         if (success) {
           // RUNNING → IDLE on success, reset failure counter.
-          const after = await paService.getPersistentAgent(agentId);
+          const after = await paService.getPersistentAgentUnscoped(agentId);
           if (after) {
             await paService.transitionPersistentAgentState(
               agentId,
@@ -478,7 +478,7 @@ export function startPersistentAgentWorker() {
           }
         } else {
           // Failure path — escalate or recover.
-          const after = await paService.getPersistentAgent(agentId);
+          const after = await paService.getPersistentAgentUnscoped(agentId);
           if (after) {
             const nextFailures = after.consecutiveFailures + 1;
             const escalate = nextFailures >= after.consecutiveFailureLimit;
@@ -509,7 +509,7 @@ export function startPersistentAgentWorker() {
             .catch(() => {});
         }
         // Try to recover the agent state to IDLE so the reconciler can decide what to do.
-        const after = await paService.getPersistentAgent(agentId);
+        const after = await paService.getPersistentAgentUnscoped(agentId);
         if (after && after.state !== PersistentAgentState.IDLE) {
           const nextFailures = after.consecutiveFailures + 1;
           const escalate = nextFailures >= after.consecutiveFailureLimit;
