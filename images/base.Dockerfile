@@ -49,7 +49,16 @@ RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); 
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
 # Claude Code
-RUN npm install -g @anthropic-ai/claude-code
+# PINNED to work around a Bun regression, NOT for feature reasons.
+# 2.1.112 is the last release shipped as a plain Node.js bundle (bin/cli.js).
+# Starting at 2.1.113 the CLI ships as a Bun-compiled single-file binary
+# (bin/claude.exe), and every such build embeds Bun >= 1.3.13 — which segfaults
+# with "embedder failed to suspend thread ... for TLC" when the binary is launched
+# via `docker exec` / `kubectl exec` (i.e. NOT as PID 1) on Linux kernel >= 7.0.
+# Optio ALWAYS execs the agent inside the long-lived repo pod, so it always hits this.
+# Upstream regression: https://github.com/oven-sh/bun/issues/31832 (Bun 1.3.12-1.3.14).
+# TODO(#566): bump back to latest once upstream Bun ships a fix and claude-code adopts it.
+RUN npm install -g @anthropic-ai/claude-code@2.1.112
 
 # OpenAI Codex CLI
 RUN npm install -g @openai/codex
@@ -57,12 +66,22 @@ RUN npm install -g @openai/codex
 # GitHub Copilot CLI (pinned + best-effort — package may be temporarily unavailable)
 RUN npm install -g @github/copilot@1.0.20 || echo "WARN: @github/copilot install failed; copilot agent will not be available in this image"
 
-# OpenCode CLI (experimental — pinned version for stable JSON output).
+# OpenCode CLI (experimental).
+# PINNED to work around the same Bun regression as Claude Code above.
+# opencode ships as a Bun-compiled single-file binary. 1.14.20 is the last release
+# built with Bun 1.3.11; starting at 1.14.21 it is built with Bun >= 1.3.13, which
+# segfaults ("embedder failed to suspend thread ... for TLC") when launched via
+# `docker exec` / `kubectl exec` (not PID 1) on Linux kernel >= 7.0 — the config
+# Optio always runs agents in.
+# Upstream regression: https://github.com/oven-sh/bun/issues/31832 (Bun 1.3.12-1.3.14).
+# The install script pins via the VERSION env var; the OPENCODE_VERSION build-arg was
+# previously declared but never passed through, so `latest` was always installed.
+# TODO(#566): bump back to latest once upstream Bun ships a fix and opencode adopts it.
 # Best-effort: opencode.ai is a single point of failure for the install
 # script, so let the build succeed even when the upstream is briefly
 # unavailable (matches the @github/copilot and openclaw fallbacks).
-ARG OPENCODE_VERSION=latest
-RUN (curl -fsSL https://opencode.ai/install | bash \
+ARG OPENCODE_VERSION=1.14.20
+RUN (curl -fsSL https://opencode.ai/install | VERSION="${OPENCODE_VERSION}" bash \
   && mv /root/.opencode/bin/opencode /usr/local/bin/ \
   && rm -rf /root/.opencode) \
   || echo "WARN: opencode install failed; opencode agent will not be available in this image"
