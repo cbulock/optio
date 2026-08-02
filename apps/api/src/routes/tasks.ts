@@ -411,7 +411,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         description:
           "Submit a new task to run against a repository. The task is " +
           "created in `pending` state and immediately transitioned to " +
-          "`queued` (or `waiting_on_deps` if `dependsOn` is non-empty). " +
+          "`queued` (or `waiting_on_deps` if `dependsOn` is non-empty); " +
+          "the response carries the post-transition row. " +
           "Requires `member` role.",
         tags: ["Tasks"],
         body: createTaskSchema,
@@ -545,8 +546,12 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         }
       }
 
+      // transitionTask returns the post-transition row — respond with that,
+      // not the stale `pending` row from createTask(), so clients never see a
+      // state the task has already left.
+      let transitioned: typeof task;
       if (hasDeps) {
-        await taskService.transitionTask(
+        transitioned = await taskService.transitionTask(
           task.id,
           TaskState.WAITING_ON_DEPS,
           "task_submitted_with_deps",
@@ -554,7 +559,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           req.user?.id,
         );
       } else {
-        await taskService.transitionTask(
+        transitioned = await taskService.transitionTask(
           task.id,
           TaskState.QUEUED,
           "task_submitted",
@@ -573,7 +578,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         );
       }
 
-      reply.status(201).send({ task: { type: "repo-task", ...task } });
+      reply.status(201).send({ task: { type: "repo-task", ...(transitioned ?? task) } });
     },
   );
 

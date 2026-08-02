@@ -118,11 +118,10 @@ async function createTask(title: string): Promise<string> {
     }),
   });
   expect(status).toBe(201);
-  // Actual behavior: the route transitions the task to `queued` before
-  // responding, but the response carries the ORIGINAL createTask() row — so
-  // the reported state is still `pending`. The queued transition shows up in
-  // the task's event log (asserted in the failure test).
-  expect(body.task.state).toBe("pending");
+  // The route transitions the task to `queued` before responding and the
+  // response carries the post-transition row — clients never see the
+  // already-left `pending` state.
+  expect(body.task.state).toBe("queued");
   return body.task.id;
 }
 
