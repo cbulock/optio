@@ -260,4 +260,43 @@ describe("repo-task e2e", () => {
     const { body: logsBody } = await api<{ logs: LogRow[] }>(`/api/tasks/${taskId}/logs`);
     expect(logsBody.logs).toHaveLength(0);
   });
+
+  it("accumulates cost and tokens across a resume instead of overwriting (issue #541)", async () => {
+    // First run reports $0.05 and no PR → needs_attention, recording cost 0.05.
+    const taskId = await createTask("Resume accumulates cost [[mock:cost:0.05]]");
+    const first = await waitForTaskState(taskId, [
+      "needs_attention",
+      "completed",
+      "failed",
+      "pr_opened",
+    ]);
+    expect(first.state).toBe("needs_attention");
+    expect(first.costUsd).toBe("0.05");
+    expect(first.inputTokens).toBe(100);
+    expect(first.outputTokens).toBe(25);
+
+    // Resume with a fresh $0.03 invocation. The resumed claude process reports
+    // only its OWN spend (0.03), so the persisted task total must ACCUMULATE to
+    // 0.05 + 0.03 = 0.08 — not be overwritten to 0.03 (the pre-fix undercount).
+    // The [[mock:cost:0.03]] directive leads the resume prompt, so it is the
+    // first match the fake sees even though the original 0.05 prompt is appended
+    // for context.
+    const { status } = await api(`/api/tasks/${taskId}/resume`, {
+      method: "POST",
+      body: JSON.stringify({ prompt: "Please continue [[mock:cost:0.03]]" }),
+    });
+    expect(status).toBe(200);
+
+    const resumed = await waitFor(
+      async () => {
+        const t = await getTask(taskId);
+        return t.costUsd === "0.08" ? t : null;
+      },
+      { timeoutMs: 90_000, label: `task ${taskId} cost accumulates to 0.08` },
+    );
+    expect(resumed.costUsd).toBe("0.08");
+    // Tokens accumulate the same way: 100+100 input, 25+25 output.
+    expect(resumed.inputTokens).toBe(200);
+    expect(resumed.outputTokens).toBe(50);
+  });
 });

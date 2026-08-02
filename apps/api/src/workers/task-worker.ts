@@ -13,6 +13,8 @@ import {
   parseRepoUrl,
   parsePrUrl,
   parseIntEnv,
+  addCostStrings,
+  addTokenCounts,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -1086,11 +1088,46 @@ export function startTaskWorker() {
 
         await taskService.updateTaskResult(taskId, result.summary, result.error);
 
-        // Persist cost, token usage, and model data
+        // Persist cost, token usage, and model data.
+        //
+        // On a resume or force-restart, Claude runs as a FRESH process (either
+        // `claude --resume <session>` or a brand-new session on the existing
+        // branch). Its result reports only its OWN turns' total_cost_usd / token
+        // usage — it has no knowledge of what the prior run already spent. So the
+        // recorded value must ACCUMULATE (prior + this run), not overwrite.
+        // Overwriting is what caused issue #541: /api/analytics/costs sums
+        // tasks.cost_usd, so replacing the original cost with just the resumed
+        // invocation's spend undercounts total spend.
+        //
+        // A first run (no resume/restart signal) has no prior spend to preserve,
+        // so it writes its value directly — this also keeps "redo from scratch"
+        // semantics for a fresh run. Accumulating never double-counts here: each
+        // relaunch is a distinct process reporting only its own cost, so
+        // prior + current is always the true total.
+        //
+        // Continuation signals: `resumeSessionId` (/resume, --resume), a
+        // `restartFromBranch` fresh session on the existing PR (/force-restart,
+        // auto-resume), or a `resumePrompt` (set by every relaunch path —
+        // including message-resume where the stored session id may be absent).
+        // Any of the three means a prior run's cost is already recorded and must
+        // be preserved; only a genuine first run has none of them.
+        const isContinuation = !!(resumeSessionId || restartFromBranch || resumePrompt);
         const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
+        if (result.costUsd != null) {
+          costFields.costUsd = isContinuation
+            ? addCostStrings(taskAfterExec.costUsd, result.costUsd)
+            : String(result.costUsd);
+        }
+        if (result.inputTokens != null) {
+          costFields.inputTokens = isContinuation
+            ? addTokenCounts(taskAfterExec.inputTokens, result.inputTokens)
+            : result.inputTokens;
+        }
+        if (result.outputTokens != null) {
+          costFields.outputTokens = isContinuation
+            ? addTokenCounts(taskAfterExec.outputTokens, result.outputTokens)
+            : result.outputTokens;
+        }
         if (result.model) costFields.modelUsed = result.model;
         if (Object.keys(costFields).length > 0) {
           await db.update(tasks).set(costFields).where(eq(tasks.id, taskId));

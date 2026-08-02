@@ -281,6 +281,32 @@ describe("ClaudeCodeAdapter", () => {
       expect(result.costUsd).toBe(0.0534);
     });
 
+    it("uses the LAST result event's cost on a multi-turn run, not the first (issue #541)", () => {
+      // With --input-format stream-json each mid-task user message produces its
+      // own result event whose total_cost_usd is cumulative for the process.
+      // Taking the first match would drop everything after turn one.
+      const logs = [
+        '{"type":"assistant","message":{"usage":{"input_tokens":100,"output_tokens":50}}}',
+        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0534,"result":"turn 1 done"}',
+        '{"type":"assistant","message":{"usage":{"input_tokens":200,"output_tokens":75}}}',
+        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1289,"result":"turn 2 done"}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBe(0.1289);
+    });
+
+    it("falls back to the LAST regex cost match when result events are not JSON", () => {
+      // Truncated/garbled result lines still expose total_cost_usd in the raw
+      // text; the fallback must also prefer the last occurrence.
+      const logs = [
+        'noise "total_cost_usd": 0.01 more noise',
+        "<partial> total_cost_usd was 0.02 ...",
+        'trailing "total_cost_usd": 0.0789 end',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBe(0.0789);
+    });
+
     it("extracts model from system init event", () => {
       const logs = [
         '{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}',

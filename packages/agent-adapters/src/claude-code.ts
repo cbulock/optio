@@ -113,7 +113,17 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const prMatch = logs.match(
       /https:\/\/(?![\w.-]+\/api\/)[^\s"]+\/(?:pull\/\d+|-\/merge_requests\/\d+)/,
     );
-    const costMatch = logs.match(/"total_cost_usd":\s*([\d.]+)/);
+    // Cost: take the LAST total_cost_usd, not the first. In stream-json mode a
+    // multi-turn run (mid-task user messages) emits a `result` event PER TURN,
+    // and each result's total_cost_usd is the CUMULATIVE cost of the process so
+    // far — so the final result event carries the full spend. Grabbing the first
+    // match would drop every turn after the first (issue #541). The authoritative
+    // value comes from the last result event (captured in the loop below); this
+    // global-regex last-match is only a fallback for logs whose result event
+    // didn't parse as JSON.
+    const costMatches = [...logs.matchAll(/"total_cost_usd":\s*([\d.]+)/g)];
+    const costFromRegex =
+      costMatches.length > 0 ? parseFloat(costMatches[costMatches.length - 1][1]) : undefined;
 
     // Extract error, token usage, model, and result text from Claude's NDJSON events
     let totalInputTokens = 0;
@@ -128,6 +138,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     let lastResultIsError = false;
     let lastResultText: string | undefined;
     let lastResultSubtype: string | undefined;
+    // Cumulative cost reported by the most recent result event (last wins).
+    let lastResultCostUsd: number | undefined;
     // Synthetic assistant text Claude Code emits when an API call fails
     // ("API Error: ..."). Only used as a failure signal when the run never
     // produced a result event (i.e. the error was terminal, not recovered).
@@ -175,6 +187,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           lastResultSubtype = typeof event.subtype === "string" ? event.subtype : undefined;
           lastResultText =
             typeof event.result === "string" && event.result ? event.result : undefined;
+          // Each result event's total_cost_usd is cumulative for the process,
+          // so the last one seen holds the authoritative final cost.
+          if (typeof event.total_cost_usd === "number") {
+            lastResultCostUsd = event.total_cost_usd;
+          }
         }
       } catch {
         // Not JSON, skip
@@ -230,7 +247,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     return {
       success,
       prUrl: prMatch?.[0],
-      costUsd: costMatch ? parseFloat(costMatch[1]) : undefined,
+      costUsd: lastResultCostUsd ?? costFromRegex,
       inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
       outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       model,
