@@ -217,11 +217,7 @@ export async function setEnabled(id: string, enabled: boolean) {
 
 // ── Trigger CRUD for task_config targets ─────────────────────────────────────
 
-import { CronExpressionParser } from "cron-parser";
-
-function computeNextFire(cronExpression: string): Date {
-  return CronExpressionParser.parse(cronExpression).next().toDate();
-}
+import { computeNextFire } from "../utils/cron.js";
 
 export async function listTaskConfigTriggers(taskConfigId: string) {
   return db

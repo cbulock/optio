@@ -1,5 +1,4 @@
 import { eq, desc, sql, and, lte } from "drizzle-orm";
-import { CronExpressionParser } from "cron-parser";
 import { db } from "../db/client.js";
 import {
   workflows,
@@ -11,6 +10,7 @@ import {
 import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
+import { computeNextFire } from "../utils/cron.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -558,11 +558,6 @@ export async function getWebhookTriggerByPath(webhookPath: string) {
 export async function getWorkflowTrigger(id: string) {
   const [trigger] = await db.select().from(workflowTriggers).where(eq(workflowTriggers.id, id));
   return trigger ?? null;
-}
-
-function computeNextFire(cronExpression: string): Date {
-  const interval = CronExpressionParser.parse(cronExpression);
-  return interval.next().toDate();
 }
 
 export async function createWorkflowTrigger(input: {
