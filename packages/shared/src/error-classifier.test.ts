@@ -23,10 +23,13 @@ describe("classifyError", () => {
     expect(result.retryable).toBe(true);
   });
 
-  it("classifies missing secret", () => {
+  it("classifies missing secret as permanent (non-retryable)", () => {
     const result = classifyError("Secret not found: ANTHROPIC_API_KEY (scope: global)");
     expect(result.category).toBe("auth");
     expect(result.title).toContain("ANTHROPIC_API_KEY");
+    // Retrying without adding the secret fails identically — must be permanent
+    // so provisioning fails the task instead of re-queuing forever.
+    expect(result.retryable).toBe(false);
   });
 
   it("classifies wrapped decrypt failure with secret name", () => {
@@ -107,6 +110,7 @@ describe("classifyError", () => {
     const result = classifyError("Secret not found: OPENAI_API_KEY");
     expect(result.category).toBe("auth");
     expect(result.title).toContain("OPENAI_API_KEY");
+    expect(result.retryable).toBe(false);
   });
 
   it("classifies OpenAI API key error directly", () => {

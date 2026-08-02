@@ -106,14 +106,21 @@ const ERROR_PATTERNS: Array<{
       retryable: true,
     }),
   },
+  // A missing required secret is a configuration error, not a transient one —
+  // retrying without adding the secret fails identically every time (and used
+  // to bounce tasks queued↔provisioning forever). Marked non-retryable so the
+  // provisioning path fails the task immediately with an actionable message.
+  // The pattern is scoped to the exact message secret-service.retrieveSecret()
+  // throws ("Secret not found: NAME (scope: ...)"), not arbitrary errors that
+  // merely mention secrets.
   {
     pattern: /Secret not found: (\w+)/i,
     classify: (match) => ({
       category: "auth",
       title: `Missing secret: ${match[1]}`,
-      description: `The required secret "${match[1]}" is not configured. The agent needs this credential to run.`,
-      remedy: `Go to Secrets and add "${match[1]}", or re-run the setup wizard.`,
-      retryable: true,
+      description: `The required secret "${match[1]}" is not configured. The agent needs this credential to run, and retrying without adding it will fail again.`,
+      remedy: `Go to Secrets and add "${match[1]}" (or re-run the setup wizard), then retry the task.`,
+      retryable: false,
     }),
   },
   // Must precede the credential-name patterns (ANTHROPIC_API_KEY, OPENAI_API_KEY, …)
