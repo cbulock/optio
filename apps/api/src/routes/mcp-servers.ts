@@ -102,6 +102,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const server = await mcpService.createMcpServer(req.body, workspaceId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.create",
         params: { name: req.body.name, command: req.body.command },
@@ -135,6 +136,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       }
       const server = await mcpService.updateMcpServer(id, req.body);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.update",
         params: { mcpServerId: id, ...req.body },
@@ -167,6 +169,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       }
       await mcpService.deleteMcpServer(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.delete",
         params: { mcpServerId: id },
@@ -226,6 +229,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         workspaceId,
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.create",
         params: { name: req.body.name, repoId: id },

@@ -226,6 +226,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       }
 
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.create",
         params: { repoUrl: body.repoUrl, fullName: body.fullName },
@@ -319,6 +320,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       const repo = await repoService.updateRepo(id, body);
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.update",
         params: { repoId: id, ...body },
@@ -354,6 +356,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       }
       await repoService.deleteRepo(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.delete",
         params: { repoId: id, repoUrl: existing.repoUrl },

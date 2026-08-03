@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
+import { assertWorkspace } from "./ws-authz.js";
 import {
   getPersistentAgent,
   listPersistentAgentTurns,
@@ -36,6 +37,12 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
     const agent = await getPersistentAgent(agentId);
     if (!agent) {
       socket.close(4404, "Persistent agent not found");
+      releaseConnection(clientIp);
+      return;
+    }
+
+    // Enforce workspace isolation before streaming the agent's turn output.
+    if (!assertWorkspace(socket, user.workspaceId, agent.workspaceId)) {
       releaseConnection(clientIp);
       return;
     }

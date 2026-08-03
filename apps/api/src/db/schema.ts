@@ -945,9 +945,12 @@ export const optioActions = pgTable(
   "optio_actions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable: NULL rows are operator/legacy actions with no tenant context and
+    // are only surfaced to admins by the activity feed (deny-by-default).
+    workspaceId: uuid("workspace_id"),
     userId: uuid("user_id").references(() => users.id),
     action: text("action").notNull(), // tool name e.g. "retry_task", "bulk_cancel_active"
-    params: jsonb("params").$type<Record<string, unknown>>(), // sanitized tool call parameters
+    params: jsonb("params").$type<Record<string, unknown>>(), // allowlisted, non-secret tool call parameters
     result: jsonb("result").$type<Record<string, unknown>>(), // outcome: affected IDs, error, etc.
     success: boolean("success").notNull(),
     conversationSnippet: text("conversation_snippet"), // user message that triggered this
@@ -957,6 +960,7 @@ export const optioActions = pgTable(
     index("optio_actions_user_id_idx").on(table.userId),
     index("optio_actions_action_idx").on(table.action),
     index("optio_actions_created_at_idx").on(table.createdAt.desc()),
+    index("optio_actions_workspace_id_idx").on(table.workspaceId),
   ],
 );
 

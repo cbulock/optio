@@ -155,6 +155,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
           params: body.params ?? undefined,
         });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "task.run",
           params: { type: parent.type, parentId: parent.data.id },
@@ -169,6 +170,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         params: body.params ?? undefined,
       });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.run",
         params: { type: parent.type, parentId: parent.data.id },

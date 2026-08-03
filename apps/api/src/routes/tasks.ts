@@ -443,6 +443,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             workspaceId: req.user?.workspaceId ?? undefined,
           });
           logAction({
+            workspaceId: req.user?.workspaceId ?? null,
             userId: req.user?.id,
             action: "task.create",
             params: { type, workflowId: workflow.id, name },
@@ -482,6 +483,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             createdBy: req.user?.id ?? null,
           });
           logAction({
+            workspaceId: req.user?.workspaceId ?? null,
             userId: req.user?.id,
             action: "task.create",
             params: { type, taskConfigId: row.id, name },
@@ -528,6 +530,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         workspaceId: req.user?.workspaceId ?? null,
       });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.create",
         params: { taskId: task.id, title: taskInput.title, repoUrl: taskInput.repoUrl },
@@ -612,6 +615,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.cancel",
         params: { taskId: id },
@@ -666,6 +670,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         },
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.retry",
         params: { taskId: id },
@@ -722,6 +727,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         },
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.force_redo",
         params: { taskId: id },
@@ -973,6 +979,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         const { launchReview } = await import("../services/review-service.js");
         const reviewTaskId = await launchReview(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "task.review",
           params: { taskId: id },
@@ -1041,6 +1048,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
 
       const task = await taskService.getTask(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.run_now",
         params: { taskId: id },
@@ -1091,6 +1099,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           .where(eq(tasks.id, body.taskIds[i]));
       }
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.reorder",
         params: { taskIds: body.taskIds },

@@ -158,6 +158,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
           enabled: input.enabled,
         });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow_trigger.create",
           params: { workflowId: id, type: input.type },
@@ -227,6 +228,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         const trigger = await triggerService.updateTrigger(triggerId, input);
         if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "workflow_trigger.update",
           params: { workflowId: id, triggerId },
@@ -276,6 +278,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
 
       await triggerService.deleteTrigger(triggerId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "workflow_trigger.delete",
         params: { workflowId: id, triggerId },

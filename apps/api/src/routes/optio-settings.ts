@@ -87,6 +87,7 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const settings = await optioSettingsService.upsertSettings(body, workspaceId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "settings.update",
         params: { ...body },

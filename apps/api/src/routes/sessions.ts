@@ -265,6 +265,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         workspaceId: req.user?.workspaceId ?? null,
       });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "session.create",
         params: { repoUrl: input.repoUrl },
@@ -305,6 +306,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       try {
         const updated = await sessionService.endSession(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "session.end",
           params: { sessionId: id },
