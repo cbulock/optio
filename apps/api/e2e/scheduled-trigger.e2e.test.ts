@@ -8,7 +8,9 @@
  * markTriggerFired advances nextFireAt + stamps lastFiredAt. Also: disabled
  * triggers are skipped by the due-query, webhook ingress via
  * POST /api/hooks/:path (including HMAC secret enforcement), and the legacy
- * /api/jobs/:id/triggers route's nextFireAt behavior.
+ * /api/jobs/:id/triggers route computing nextFireAt for schedule triggers
+ * just like the unified route (it used to leave it null — such triggers
+ * never fired).
  *
  * cron-parser supports 6-field (seconds) expressions, so schedule triggers
  * here use every-2-seconds crons to become due within ~2s instead of waiting
@@ -195,16 +197,35 @@ describe("scheduled trigger e2e", () => {
       WHERE id = ${disabledTrigger.id}
     `;
 
-    // Legacy /api/jobs/:id/triggers route: its createTrigger never computes
-    // nextFireAt, so an enabled schedule trigger created there is never due.
+    // Legacy /api/jobs/:id/triggers route: its createTrigger computes
+    // nextFireAt exactly like the unified route (regression: it used to leave
+    // it null, so schedule triggers created there never fired). A daily cron
+    // anchored ~12h out keeps the computed nextFireAt far from due, so the
+    // poller can't fire it before we null the value below.
+    const cronAnchor = new Date(Date.now() + 12 * 60 * 60 * 1000);
     const legacyWorkflowId = await createJob("e2e legacy trigger job", "Should never run either");
     const legacyRes = await api<{ trigger: Trigger }>(`/api/jobs/${legacyWorkflowId}/triggers`, {
       method: "POST",
-      body: JSON.stringify({ type: "schedule", config: { cronExpression: "* * * * * *" } }),
+      body: JSON.stringify({
+        type: "schedule",
+        config: {
+          cronExpression: `${cronAnchor.getUTCMinutes()} ${cronAnchor.getUTCHours()} * * *`,
+        },
+      }),
     });
     expect(legacyRes.status).toBe(201);
     expect(legacyRes.body.trigger.enabled).toBe(true);
-    expect(legacyRes.body.trigger.nextFireAt).toBeNull();
+    expect(legacyRes.body.trigger.nextFireAt).not.toBeNull();
+    const legacyNextFireAt = new Date(legacyRes.body.trigger.nextFireAt!).getTime();
+    expect(legacyNextFireAt).toBeGreaterThan(Date.now());
+    expect(legacyNextFireAt).toBeLessThanOrEqual(cronAnchor.getTime() + 24 * 60 * 60 * 1000);
+
+    // The API can no longer produce a nextFireAt-less enabled schedule
+    // trigger — null it directly to pin the due-query's NULL handling.
+    await sql`
+      UPDATE workflow_triggers SET next_fire_at = NULL
+      WHERE id = ${legacyRes.body.trigger.id}
+    `;
 
     // Canary: an enabled, due schedule trigger created AFTER both of the
     // above. When it fires and its run completes, the poller has demonstrably

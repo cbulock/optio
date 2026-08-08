@@ -8,16 +8,19 @@
  *   - createWorkflowRun: queued row insert + BullMQ enqueue on "workflow-runs"
  *   - transitionWorkflowRunState state-machine enforcement
  *   - appendWorkflowRunLog / getWorkflowRunLogs roundtrip incl. logType filter
- *   - retryWorkflowRun / cancelWorkflowRun state rules
+ *   - retryWorkflowRun / cancelWorkflowRun state rules, incl. cancel
+ *     exhausting the retry budget so the reconciler cannot auto-retry
+ *     a user-cancelled run
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
-import { WorkflowRunState } from "@optio/shared";
+import { WorkflowRunState, reconcileStandalone } from "@optio/shared";
 import { db } from "../db/client.js";
 import { workflowRuns } from "../db/schema.js";
 import * as workflowService from "./workflow-service.js";
+import { buildWorldSnapshot } from "./reconcile-snapshot.js";
 import { getBullMQConnectionOptions } from "./redis-config.js";
 import {
   insertWorkflow,
@@ -352,14 +355,36 @@ describe("retryWorkflowRun / cancelWorkflowRun", () => {
     );
   });
 
-  it("cancel fails a queued run with a cancellation message", async () => {
-    const wf = await insertWorkflow();
+  it("cancel fails a queued run with a cancellation message and exhausts the retry budget", async () => {
+    const wf = await insertWorkflow({ maxRetries: 3 });
     const run = await insertWorkflowRun(wf.id); // queued
 
     const cancelled = await workflowService.cancelWorkflowRun(run.id);
     expect(cancelled.state).toBe(WorkflowRunState.FAILED);
     expect(cancelled.errorMessage).toBe("Cancelled by user");
     expect(cancelled.finishedAt).toBeInstanceOf(Date);
+    // retryCount is stamped to the workflow's maxRetries so the reconciler's
+    // decideFailed — which auto-retries any FAILED run with budget left and
+    // cannot tell a user cancel from an agent failure — leaves it alone.
+    expect(cancelled.retryCount).toBe(3);
+
+    // Prove it end-to-end against the reconciler's decision function: the
+    // cancelled run's snapshot decides noop, not auto_retry back to QUEUED.
+    const snapshot = await buildWorldSnapshot({ kind: "standalone", id: run.id });
+    expect(snapshot).not.toBeNull();
+    expect(reconcileStandalone(snapshot!)).toEqual({
+      kind: "noop",
+      reason: "failed_no_retry_intent",
+    });
+  });
+
+  it("cancel never lowers a retryCount already above the workflow's maxRetries", async () => {
+    const wf = await insertWorkflow({ maxRetries: 1 });
+    const run = await insertWorkflowRun(wf.id, { state: "running", retryCount: 4 });
+
+    const cancelled = await workflowService.cancelWorkflowRun(run.id);
+    expect(cancelled.state).toBe(WorkflowRunState.FAILED);
+    expect(cancelled.retryCount).toBe(4);
   });
 
   it("cancel rejects runs already in a state that cannot fail", async () => {

@@ -542,6 +542,20 @@ export async function listAssignments(connectionId: string): Promise<ConnectionA
   return rows.map(mapAssignmentRow);
 }
 
+/**
+ * Fetch a single assignment by id (read-only). Used by the routes layer to
+ * resolve the owning connection for workspace-scoping the flat
+ * `/api/connection-assignments/:id` routes, which otherwise take only the
+ * assignment id and would be an IDOR surface.
+ */
+export async function getAssignment(id: string): Promise<ConnectionAssignment | null> {
+  const [row] = await db
+    .select()
+    .from(connectionAssignments)
+    .where(eq(connectionAssignments.id, id));
+  return row ? mapAssignmentRow(row) : null;
+}
+
 export async function createAssignment(
   connectionId: string,
   input: {

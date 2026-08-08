@@ -9,7 +9,9 @@
  *   - target_type="task_config" → instantiateTask → queued tasks row with
  *     rendered prompt/title
  *   - disabled / not-yet-due triggers are never selected
- * plus the workflow-trigger-service CRUD round-trip.
+ * plus the workflow-trigger-service CRUD round-trip — including that its
+ * create/update stamp nextFireAt for schedule triggers so they actually fire
+ * (regression: it used to leave nextFireAt null and they never fired).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -364,20 +366,71 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
     expect(await triggerService.getTrigger(ghost)).toBeNull();
   });
 
-  it("createTrigger does not compute nextFireAt for schedule triggers (actual behavior)", async () => {
-    // Unlike workflowService.createWorkflowTrigger, this service leaves
-    // nextFireAt null — a schedule trigger created through it (and through
-    // POST /api/jobs/:id/triggers, which calls it) is never selected by
-    // getDueScheduleTriggersAll until something else sets nextFireAt.
+  it("createTrigger computes nextFireAt for schedule triggers, and the trigger fires once due", async () => {
+    // Regression: this service used to leave nextFireAt null, so a schedule
+    // trigger created through it (and through POST /api/jobs/:id/triggers,
+    // which calls it) was never selected by getDueScheduleTriggersAll and
+    // never fired. It must behave like workflowService.createWorkflowTrigger.
+    const workflow = await insertWorkflow();
+    const beforeCreate = Date.now();
+    // Every-second cron (cron-parser 6-field): nextFireAt lands within ~1s,
+    // so the trigger becomes due without waiting out a minute boundary.
+    const trigger = await triggerService.createTrigger({
+      workflowId: workflow.id,
+      type: "schedule",
+      config: { cronExpression: "* * * * * *" },
+    });
+    expect(trigger.nextFireAt).not.toBeNull();
+    expect(trigger.nextFireAt!.getTime()).toBeGreaterThan(beforeCreate);
+    expect(trigger.nextFireAt!.getTime()).toBeLessThanOrEqual(Date.now() + 1_000);
+
+    // Once the computed nextFireAt passes, the worker check fires it.
+    await waitUntil(async () => Date.now() > trigger.nextFireAt!.getTime(), "trigger to be due");
+    await runTriggerCheck();
+
+    const runs = await runsFor(workflow.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].state).toBe("queued");
+    expect(runs[0].triggerId).toBe(trigger.id);
+
+    const after = await triggerService.getTrigger(trigger.id);
+    expect(after!.lastFiredAt).not.toBeNull();
+    expect(after!.nextFireAt!.getTime()).toBeGreaterThan(trigger.nextFireAt!.getTime());
+
+    // An every-second cron is perpetually due again — disable it so later
+    // checks can't re-fire it. Disabling a schedule trigger clears nextFireAt.
+    const disabled = await triggerService.updateTrigger(trigger.id, { enabled: false });
+    expect(disabled!.enabled).toBe(false);
+    expect(disabled!.nextFireAt).toBeNull();
+  });
+
+  it("updateTrigger recomputes nextFireAt on re-enable and cron change, clears it on disable", async () => {
     const workflow = await insertWorkflow();
     const trigger = await triggerService.createTrigger({
       workflowId: workflow.id,
       type: "schedule",
       config: { cronExpression: DAILY_CRON },
     });
-    expect(trigger.nextFireAt).toBeNull();
+    expect(trigger.nextFireAt).not.toBeNull();
 
-    await runTriggerCheck();
-    expect(await runsFor(workflow.id)).toHaveLength(0);
+    // Disabling clears nextFireAt → the poller can never select it.
+    const disabled = await triggerService.updateTrigger(trigger.id, { enabled: false });
+    expect(disabled!.nextFireAt).toBeNull();
+
+    // Re-enabling recomputes it from the stored cron config.
+    const reenabled = await triggerService.updateTrigger(trigger.id, { enabled: true });
+    expect(reenabled!.nextFireAt).not.toBeNull();
+    expect(reenabled!.nextFireAt!.getTime()).toBeGreaterThan(Date.now());
+
+    // Changing the cron reschedules: an hourly cron lands within the next
+    // hour, always sooner than the ~12h-out DAILY_CRON anchor.
+    const hourly = await triggerService.updateTrigger(trigger.id, {
+      config: { cronExpression: "0 * * * *" },
+    });
+    expect(hourly!.nextFireAt!.getTime()).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
+    expect(hourly!.nextFireAt!.getTime()).toBeLessThan(reenabled!.nextFireAt!.getTime());
+
+    // Remove it so it can't become due for any later check in this file.
+    expect(await triggerService.deleteTrigger(trigger.id)).toBe(true);
   });
 });

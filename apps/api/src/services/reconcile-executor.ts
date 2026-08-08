@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workflowRuns, prReviews, persistentAgents } from "../db/schema.js";
 import type {
@@ -235,7 +235,11 @@ async function applyStandaloneTransition(
     .where(
       and(
         eq(workflowRuns.id, id),
-        eq(workflowRuns.updatedAt, version),
+        // Ms-truncating comparison, NOT a plain eq — see updatedAtMatches. A
+        // raw eq() silently never matches rows whose updated_at carries
+        // microseconds (e.g. stamped by PG's now()/defaultNow()), which made
+        // every standalone transition from such rows permanently stale.
+        updatedAtMatches(workflowRuns.updatedAt, version),
         eq(workflowRuns.state, fromState),
       ),
     )
@@ -614,6 +618,22 @@ async function publishStandaloneStateChange(
 
 // ── CAS helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Millisecond-precision `updated_at` comparison — the ONE way every CAS guard
+ * in this file must compare versions. Postgres `timestamptz` columns store
+ * microseconds, but JavaScript's Date type only carries milliseconds — so a
+ * JS-side `eq(updated_at, version)` against a row whose updated_at was set by
+ * PG's `now()`/`defaultNow()` (microsecond precision) will silently never
+ * match, leaving the row permanently "stale" to the executor. We truncate
+ * both sides to milliseconds so the round-trip is symmetric. JS-originated
+ * writes are already ms-precision so this is exactly the comparison we want
+ * everywhere.
+ */
+function updatedAtMatches(column: SQLWrapper, version: Date): SQL {
+  return sql`date_trunc('milliseconds', ${column})
+      = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`;
+}
+
 async function casUpdate(
   table: "tasks" | "workflow_runs" | "pr_reviews" | "persistent_agents",
   id: string,
@@ -621,24 +641,11 @@ async function casUpdate(
   patch: Record<string, unknown>,
 ): Promise<"applied" | "stale"> {
   const payload = { ...patch, updatedAt: new Date() };
-  // Compare timestamps at millisecond precision. Postgres `timestamptz`
-  // columns store microseconds, but JavaScript's Date type only carries
-  // milliseconds — so a JS-side `eq(updated_at, version)` against a row
-  // whose updated_at was set by PG's `now()` (microsecond precision) will
-  // silently never match. We truncate both sides to milliseconds so the
-  // round-trip is symmetric. JS-originated writes are already ms-precision
-  // so this is exactly the comparison we want everywhere.
   if (table === "tasks") {
     const rows = await db
       .update(tasks)
       .set(payload)
-      .where(
-        and(
-          eq(tasks.id, id),
-          sql`date_trunc('milliseconds', ${tasks.updatedAt})
-              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
-        ),
-      )
+      .where(and(eq(tasks.id, id), updatedAtMatches(tasks.updatedAt, version)))
       .returning({ id: tasks.id });
     return rows.length > 0 ? "applied" : "stale";
   }
@@ -646,13 +653,7 @@ async function casUpdate(
     const rows = await db
       .update(prReviews)
       .set(payload)
-      .where(
-        and(
-          eq(prReviews.id, id),
-          sql`date_trunc('milliseconds', ${prReviews.updatedAt})
-              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
-        ),
-      )
+      .where(and(eq(prReviews.id, id), updatedAtMatches(prReviews.updatedAt, version)))
       .returning({ id: prReviews.id });
     return rows.length > 0 ? "applied" : "stale";
   }
@@ -661,11 +662,7 @@ async function casUpdate(
       .update(persistentAgents)
       .set(payload)
       .where(
-        and(
-          eq(persistentAgents.id, id),
-          sql`date_trunc('milliseconds', ${persistentAgents.updatedAt})
-              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
-        ),
+        and(eq(persistentAgents.id, id), updatedAtMatches(persistentAgents.updatedAt, version)),
       )
       .returning({ id: persistentAgents.id });
     return rows.length > 0 ? "applied" : "stale";
@@ -673,13 +670,7 @@ async function casUpdate(
   const rows = await db
     .update(workflowRuns)
     .set(payload)
-    .where(
-      and(
-        eq(workflowRuns.id, id),
-        sql`date_trunc('milliseconds', ${workflowRuns.updatedAt})
-            = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
-      ),
-    )
+    .where(and(eq(workflowRuns.id, id), updatedAtMatches(workflowRuns.updatedAt, version)))
     .returning({ id: workflowRuns.id });
   return rows.length > 0 ? "applied" : "stale";
 }

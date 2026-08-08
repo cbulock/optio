@@ -18,6 +18,7 @@ import { z } from "zod";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as workflowService from "../services/workflow-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
+import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 
@@ -120,6 +121,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/runs",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createTaskRun",
         summary: "Kick off a run",
@@ -241,6 +243,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/triggers",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createTaskTrigger",
         summary: "Attach a trigger to a Task",
@@ -309,6 +312,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tasks/:id/triggers/:triggerId",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateTaskTrigger",
         summary: "Update a trigger",
@@ -364,6 +368,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tasks/:id/triggers/:triggerId",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteTaskTrigger",
         summary: "Delete a trigger",

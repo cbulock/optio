@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import * as webhookService from "../services/webhook-service.js";
+import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WebhookSchema, WebhookDeliverySchema } from "../schemas/integration.js";
@@ -127,12 +128,14 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/webhooks",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createWebhook",
         summary: "Create an outbound webhook",
         description:
           "Register a new outbound webhook. The `url` is SSRF-guarded — " +
-          "URLs pointing at private/internal addresses are rejected.",
+          "URLs pointing at private/internal addresses are rejected. " +
+          "Requires `member` role.",
         tags: ["Repos & Integrations"],
         body: createWebhookSchema,
         response: { 201: WebhookResponseSchema },
@@ -158,12 +161,14 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/webhooks/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateWebhook",
         summary: "Update a webhook",
         description:
           "Partial update to a webhook. URL changes are SSRF-guarded; setting " +
-          "`active: false` pauses deliveries without deleting the record.",
+          "`active: false` pauses deliveries without deleting the record. " +
+          "Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateWebhookSchema,
@@ -197,10 +202,11 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/webhooks/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteWebhook",
         summary: "Delete a webhook",
-        description: "Delete a webhook. Returns 204 on success.",
+        description: "Delete a webhook. Returns 204 on success. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         response: { 204: z.null(), 404: ErrorResponseSchema },
@@ -231,13 +237,14 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/webhooks/:id/test",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "testWebhook",
         summary: "Fire a test delivery",
         description:
           "Deliver a synthetic sample payload for the specified event (or " +
           "the first subscribed event if omitted). Useful for verifying " +
-          "endpoint wiring without running a real task.",
+          "endpoint wiring without running a real task. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: testWebhookBodySchema,

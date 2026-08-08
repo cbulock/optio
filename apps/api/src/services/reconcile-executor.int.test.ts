@@ -10,16 +10,14 @@
  *
  * so reconcileOnce() below composes those same three calls.
  *
- * Precision note (discovered against the real DB): applyStandaloneTransition
- * CAS-guards with a plain `eq(workflowRuns.updatedAt, version)` — unlike
- * casUpdate(), which truncates both sides to milliseconds. A row whose
- * updated_at was last written by PG `now()` (microsecond precision) therefore
- * NEVER matches the ms-precision snapshot version, and every standalone
- * transition from it returns "stale". In production runs reach FAILED via
- * worker/service writes that stamp a JS Date (ms precision), so the guard
- * works there; these tests seed `updatedAt: new Date()` to mirror that, and
- * pin the µs-precision behavior (both the stale transition and the µs-safe
- * casUpdate path) in dedicated tests at the bottom.
+ * Precision note (discovered against the real DB): Postgres `timestamptz`
+ * columns store microseconds while JS Dates carry milliseconds, so every CAS
+ * guard in the executor — including applyStandaloneTransition's — compares
+ * updated_at truncated to milliseconds (see updatedAtMatches). A plain eq()
+ * would silently never match a row whose updated_at was last written by PG
+ * `now()`/`defaultNow()`, leaving every standalone transition from it
+ * permanently "stale". Dedicated tests at the bottom pin the µs-safe behavior
+ * on both the transition and casUpdate paths.
  *
  * Covers:
  *  - QUEUED run → enqueueAgent → the BullMQ "workflow-runs" queue receives
@@ -33,9 +31,11 @@
  *    snapshot is rejected ("cas_failed_standalone_transition") instead of
  *    double-applying.
  *  - FAILED run with retries exhausted stays FAILED, with no write at all.
- *  - control_intent="cancel" on a QUEUED run → FAILED, intent cleared, no
- *    agent job enqueued.
- *  - The µs/ms CAS seam, both ways (see precision note above).
+ *  - control_intent="cancel" on a QUEUED run → FAILED with the retry budget
+ *    exhausted, intent cleared, no agent job enqueued — and the next pass
+ *    leaves the cancelled run alone instead of auto-retrying it.
+ *  - The µs/ms CAS seam: transitions and casUpdate both apply from
+ *    µs-stamped rows (see precision note above).
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Queue } from "bullmq";
@@ -255,28 +255,30 @@ describe("reconcile standalone: snapshot → decide → execute", () => {
     expect(row.controlIntent).toBeNull();
     expect(row.errorMessage).toBe("Cancelled by user");
     expect(row.finishedAt).not.toBeNull();
+    // Cancellation exhausts the retry budget (insertWorkflow's maxRetries
+    // defaults to 1) so decideFailed cannot auto-retry the cancelled run.
+    expect(row.retryCount).toBe(1);
 
     // The intent short-circuits before decideQueued — no agent job enqueued.
     expect(await agentJobsFor(run.id)).toHaveLength(0);
 
-    // Actual (surprising) follow-up behavior, decision-only so the cancelled
-    // state above stays put: the run is now FAILED with retryCount 0 <
-    // maxRetries and no intent, and decideFailed does not distinguish user
-    // cancellation from agent failure — the next pass would auto-retry the
-    // cancelled run back to QUEUED. (Production cancels via
-    // workflowService.cancelWorkflowRun land in the same failed shape.)
-    const followUpSnapshot = (await buildWorldSnapshot({ kind: "standalone", id: run.id }))!;
-    const followUpAction = reconcileStandalone(followUpSnapshot);
-    expect(followUpAction).toMatchObject({
-      kind: "transition",
-      to: WorkflowRunState.QUEUED,
-      trigger: "auto_retry",
-    });
+    // Follow-up pass: decideFailed sees no retry budget left and leaves the
+    // cancelled run alone. (Before the retry-budget stamp, it treated the
+    // cancellation like any failure and flipped it back to QUEUED — a
+    // user-cancelled run silently reran.)
+    const followUp = await reconcileOnce(run.id);
+    expect(followUp.action).toEqual({ kind: "noop", reason: "failed_no_retry_intent" });
+    expect(followUp.outcome).toEqual({ status: "skipped", reason: "failed_no_retry_intent" });
+    const rowAfter = await getRun(run.id);
+    expect(rowAfter.state).toBe("failed");
+    expect(rowAfter.errorMessage).toBe("Cancelled by user");
+    expect(rowAfter.updatedAt.getTime()).toBe(row.updatedAt.getTime());
+    expect(await agentJobsFor(run.id)).toHaveLength(0);
   });
 });
 
 describe("reconcile standalone: µs/ms updated_at precision seam", () => {
-  it("standalone transition goes permanently stale when updated_at carries microseconds", async () => {
+  it("standalone transition applies when updated_at carries microseconds", async () => {
     const workflow = await insertWorkflow();
     const run = await insertWorkflowRun(workflow.id, {
       state: "failed",
@@ -293,22 +295,26 @@ describe("reconcile standalone: µs/ms updated_at precision seam", () => {
     `);
 
     // The decision is a normal auto-retry transition...
-    const { action, outcome } = await reconcileOnce(run.id);
+    const { snapshot, action, outcome } = await reconcileOnce(run.id);
     expect(action).toMatchObject({ kind: "transition", to: WorkflowRunState.QUEUED });
 
-    // ...but applyStandaloneTransition guards with a plain eq(updatedAt,
-    // version) — no date_trunc, unlike casUpdate — so the ms-truncated
-    // snapshot version never matches the µs-precision stored value and the
-    // write is refused. Re-running the pass yields the same stale outcome:
-    // the auto-retry can never apply until some other writer stamps a
-    // ms-precision updated_at.
-    expect(outcome).toEqual({ status: "stale", reason: "cas_failed_standalone_transition" });
-    const again = await reconcileOnce(run.id);
-    expect(again.outcome).toEqual({ status: "stale", reason: "cas_failed_standalone_transition" });
+    // ...and applyStandaloneTransition now guards with the same ms-truncating
+    // updated_at comparison as casUpdate, so the ms-precision snapshot version
+    // matches the µs-precision stored value and the write applies. (It used
+    // to be a plain eq(updatedAt, version), which NEVER matched a µs-stamped
+    // row — every transition from it was permanently stale.)
+    expect(outcome).toEqual({ status: "applied", reason: "standalone_transition:queued" });
 
     const row = await getRun(run.id);
-    expect(row.state).toBe("failed");
-    expect(row.retryCount).toBe(0);
+    expect(row.state).toBe("queued");
+    expect(row.retryCount).toBe(1);
+    expect(row.errorMessage).toBeNull();
+
+    // CAS integrity is intact: replaying the same action from the now-stale
+    // snapshot is still refused (updated_at and state have both moved on).
+    const replay = await executeAction(action, snapshot);
+    expect(replay).toEqual({ status: "stale", reason: "cas_failed_standalone_transition" });
+    expect((await getRun(run.id)).retryCount).toBe(1);
   });
 
   it("clearControlIntent uses the date_trunc CAS and applies despite microsecond precision", async () => {
