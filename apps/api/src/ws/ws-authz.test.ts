@@ -20,7 +20,7 @@ const mockGetPersistentAgent = vi.fn();
 const mockListTurns = vi.fn();
 const mockListTurnLogs = vi.fn();
 vi.mock("../services/persistent-agent-service.js", () => ({
-  getPersistentAgent: (...a: unknown[]) => mockGetPersistentAgent(...a),
+  getPersistentAgentUnscoped: (...a: unknown[]) => mockGetPersistentAgent(...a),
   listPersistentAgentTurns: (...a: unknown[]) => mockListTurns(...a),
   listTurnLogs: (...a: unknown[]) => mockListTurnLogs(...a),
 }));
