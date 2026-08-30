@@ -4,6 +4,7 @@ import { z } from "zod";
 import { checkRuntimeHealth } from "../services/container-service.js";
 import {
   getCodexAuthAccount,
+  getAnyCodexAuthAccount,
   upsertCodexAuthAccount,
   importCodexAuthFromSession,
   startCodexAuthSession,
@@ -201,7 +202,7 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       // Claude Vertex AI is detected by Claude-specific GCP project secret
       const hasClaudeVertexAi = secretNames.includes("CLAUDE_VERTEX_PROJECT_ID");
 
-      const codexAccount = await getCodexAuthAccount();
+      const codexAccount = await getAnyCodexAuthAccount();
       const hasCodexAppServer =
         (!!codexAccount?.appServerUrl && codexAccount.status === "connected") ||
         (secretNames.includes("CODEX_APP_SERVER_URL") && secretNames.includes("CODEX_AUTH_JSON"));

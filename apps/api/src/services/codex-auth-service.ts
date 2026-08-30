@@ -47,6 +47,14 @@ export async function getCodexAuthAccount(workspaceId?: string | null) {
   return account ?? null;
 }
 
+export async function getAnyCodexAuthAccount() {
+  const [account] = await db
+    .select()
+    .from(codexAuthAccounts)
+    .where(eq(codexAuthAccounts.name, "default"));
+  return account ?? null;
+}
+
 export async function upsertCodexAuthAccount(input: {
   workspaceId?: string | null;
   userId?: string | null;

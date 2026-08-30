@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 const mockListSecrets = vi.fn();
 const mockRetrieveSecret = vi.fn();
 const mockGetCodexAuthAccount = vi.fn();
+const mockGetAnyCodexAuthAccount = vi.fn();
 const mockUpsertCodexAuthAccount = vi.fn();
 const mockImportCodexAuthFromSession = vi.fn();
 const mockStartCodexAuthSession = vi.fn();
@@ -17,6 +18,7 @@ vi.mock("../services/secret-service.js", () => ({
 }));
 vi.mock("../services/codex-auth-service.js", () => ({
   getCodexAuthAccount: (...args: unknown[]) => mockGetCodexAuthAccount(...args),
+  getAnyCodexAuthAccount: (...args: unknown[]) => mockGetAnyCodexAuthAccount(...args),
   upsertCodexAuthAccount: (...args: unknown[]) => mockUpsertCodexAuthAccount(...args),
   importCodexAuthFromSession: (...args: unknown[]) => mockImportCodexAuthFromSession(...args),
   startCodexAuthSession: (...args: unknown[]) => mockStartCodexAuthSession(...args),
@@ -61,6 +63,7 @@ describe("GET /api/setup/status", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockGetCodexAuthAccount.mockResolvedValue(null);
+    mockGetAnyCodexAuthAccount.mockResolvedValue(null);
     app = await buildTestApp();
   });
 
@@ -161,6 +164,25 @@ describe("GET /api/setup/status", () => {
       { name: "CODEX_AUTH_JSON" },
     ]);
     mockRetrieveSecret.mockRejectedValue(new Error("decrypt failed: AAD mismatch"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+
+    expect(res.json().isSetUp).toBe(true);
+    expect(res.json().steps.codexAppServer.done).toBe(true);
+    expect(res.json().steps.anyAgentKey.done).toBe(true);
+  });
+
+  it("detects a workspace-scoped managed Codex account in setup status", async () => {
+    mockListSecrets.mockResolvedValue([{ name: "GITHUB_TOKEN" }]);
+    mockRetrieveSecret.mockRejectedValue(new Error("not found"));
+    mockGetAnyCodexAuthAccount.mockResolvedValue({
+      id: "acct-1",
+      workspaceId: "ws-1",
+      name: "default",
+      appServerUrl: "ws://localhost:3900/v1/connect",
+      status: "connected",
+    });
     mockCheckRuntimeHealth.mockResolvedValue(true);
 
     const res = await app.inject({ method: "GET", url: "/api/setup/status" });

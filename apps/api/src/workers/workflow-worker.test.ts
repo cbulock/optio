@@ -175,9 +175,36 @@ describe("buildWorkflowAgentCommand", () => {
     it("produces a codex exec command", () => {
       const cmds = buildWorkflowAgentCommand("codex", {
         OPTIO_PROMPT: "Build feature",
+        OPTIO_TASK_ID: "workflow-123",
       });
       expect(cmds.some((c) => c.includes("codex exec"))).toBe(true);
       expect(cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox"))).toBe(true);
+    });
+
+    it("bootstraps a task-scoped codex login in api-key mode", () => {
+      const cmds = buildWorkflowAgentCommand("codex", {
+        OPTIO_PROMPT: "Build feature",
+        OPTIO_CODEX_AUTH_MODE: "api-key",
+        OPTIO_TASK_ID: "workflow-123",
+      });
+
+      expect(
+        cmds.some((c) => c.includes('export CODEX_HOME="/home/agent/.optio-codex/workflow-123"')),
+      ).toBe(true);
+      expect(cmds.some((c) => c.includes("codex login --with-api-key >/dev/null || exit $?"))).toBe(
+        true,
+      );
+      expect(cmds.some((c) => c.includes("codex exec --json"))).toBe(true);
+    });
+
+    it("uses the app-server helper in app-server mode", () => {
+      const cmds = buildWorkflowAgentCommand("codex", {
+        OPTIO_PROMPT: "Build feature",
+        OPTIO_CODEX_AUTH_MODE: "app-server",
+      });
+
+      expect(cmds.some((c) => c.includes("node .optio/codex-app-server-client.mjs"))).toBe(true);
+      expect(cmds.some((c) => c.includes("codex login --with-api-key"))).toBe(false);
     });
   });
 

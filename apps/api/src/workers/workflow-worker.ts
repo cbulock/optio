@@ -58,6 +58,15 @@ export function buildWorkflowAgentCommand(
   opts?: { maxTurns?: number },
 ): string[] {
   const maxTurns = opts?.maxTurns ?? DEFAULT_MAX_TURNS_CODING;
+  const buildCodexApiKeySetup = () => [
+    `export CODEX_HOME="/home/agent/.optio-codex/${env.OPTIO_TASK_ID ?? "task"}"`,
+    `rm -rf "$CODEX_HOME"`,
+    `mkdir -p "$CODEX_HOME"`,
+    `printf 'cli_auth_credentials_store = "file"\n' > "$CODEX_HOME/config.toml"`,
+    `chmod 700 "$CODEX_HOME"`,
+    `echo "[optio] Logging in Codex with API key..."`,
+    `printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null || exit $?`,
+  ];
 
   switch (agentType) {
     case "claude-code": {
@@ -90,9 +99,13 @@ export function buildWorkflowAgentCommand(
       ];
     }
     case "codex": {
+      const appServerMode = env.OPTIO_CODEX_AUTH_MODE === "app-server";
       return [
-        `echo "[optio] Running workflow agent (Codex)..."`,
-        `codex exec --json --dangerously-bypass-approvals-and-sandbox "$OPTIO_PROMPT"`,
+        ...(appServerMode ? [] : buildCodexApiKeySetup()),
+        `echo "[optio] Running workflow agent (Codex${appServerMode ? " app-server" : ""})..."`,
+        appServerMode
+          ? `node .optio/codex-app-server-client.mjs`
+          : `codex exec --json --dangerously-bypass-approvals-and-sandbox "$OPTIO_PROMPT"`,
       ];
     }
     case "copilot": {
