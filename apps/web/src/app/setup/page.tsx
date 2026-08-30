@@ -41,6 +41,19 @@ interface RepoEntry {
   validated: boolean;
 }
 
+interface CodexLoginStatus {
+  state: string;
+  canImport: boolean;
+  authDetected: boolean;
+  instructions: string[];
+  sessionId: string | null;
+  repoUrl: string | null;
+  loginUrl: string | null;
+  userCode: string | null;
+  lastError: string | null;
+  logExcerpt: string | null;
+}
+
 function isGitHubUrl(url: string): boolean {
   return /(^|[./:@])github\.com([/:]|$)/i.test(url);
 }
@@ -104,6 +117,16 @@ export default function SetupPage() {
   // Step 3: Codex auth mode
   const [codexAuthMode, setCodexAuthMode] = useState<"api-key" | "app-server">("api-key");
   const [codexAppServerUrl, setCodexAppServerUrl] = useState("");
+  const [codexAuthJson, setCodexAuthJson] = useState("");
+  const [codexAuthImported, setCodexAuthImported] = useState(false);
+  const [codexAuthAccountId, setCodexAuthAccountId] = useState("");
+  const [codexLoginRepoUrl, setCodexLoginRepoUrl] = useState("");
+  const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
+  const [codexLoginLoading, setCodexLoginLoading] = useState(false);
+  const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const [codexLoginStatus, setCodexLoginStatus] = useState<CodexLoginStatus | null>(null);
+  const [codexStatusLoading, setCodexStatusLoading] = useState(false);
+  const codexAutoImportAttemptedRef = useRef<string | null>(null);
 
   // Step 3: Copilot token
   const [copilotToken, setCopilotToken] = useState("");
@@ -201,6 +224,62 @@ export default function SetupPage() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshCodexAuthStatus = async (showSpinner = false) => {
+      if (showSpinner) setCodexStatusLoading(true);
+      try {
+        const res = await api.getCodexAuthAccount();
+        if (cancelled) return;
+        setCodexLoginStatus(res.login);
+        if (res.account) {
+          setCodexAuthAccountId(res.account.id);
+          setCodexAppServerUrl((current) => current || res.account.appServerUrl);
+          setCodexLoginSessionId(res.account.loginSessionId ?? "");
+          setCodexLoginRepoUrl((current) => current || res.account.loginSessionRepoUrl || "");
+          setCodexAuthImported(res.account.status === "connected");
+          setCodexAuthMode("app-server");
+        }
+      } catch {
+        if (!cancelled) setCodexLoginStatus(null);
+      } finally {
+        if (!cancelled && showSpinner) setCodexStatusLoading(false);
+      }
+    };
+
+    void refreshCodexAuthStatus(true);
+    const shouldPoll =
+      codexAuthMode === "app-server" ||
+      Boolean(codexLoginSessionId) ||
+      codexLoginStatus?.state === "starting" ||
+      codexLoginStatus?.state === "waiting_for_login";
+
+    if (!shouldPoll) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshCodexAuthStatus(false);
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [codexAuthMode, codexLoginSessionId, codexLoginStatus?.state]);
+
+  useEffect(() => {
+    if (!codexLoginStatus?.canImport || codexAuthImported || codexImportLoading) return;
+    if (!codexLoginSessionId) return;
+    if (codexAutoImportAttemptedRef.current === codexLoginSessionId) return;
+
+    codexAutoImportAttemptedRef.current = codexLoginSessionId;
+    void importCodexLoginFromSession(true);
+  }, [codexAuthImported, codexImportLoading, codexLoginSessionId, codexLoginStatus?.canImport]);
+
   // Check if OAuth token is already stored when reaching the agents step
   useEffect(() => {
     if (step === 2) {
@@ -265,6 +344,12 @@ export default function SetupPage() {
     if (!draftRepoUrl && repos.length > 0) setDraftRepoUrl(repos[0].url);
   }, [step]);
 
+  useEffect(() => {
+    if (!codexLoginRepoUrl && repos.length > 0) {
+      setCodexLoginRepoUrl(repos[0].url);
+    }
+  }, [repos, codexLoginRepoUrl]);
+
   const claudeReady =
     claudeAuthMode === "oauth-token"
       ? oauthTokenDetected || oauthToken.trim().length > 0
@@ -273,7 +358,10 @@ export default function SetupPage() {
         : anthropicValidated;
 
   const codexReady =
-    codexAuthMode === "app-server" ? codexAppServerUrl.trim().length > 0 : openaiValidated;
+    codexAuthMode === "app-server"
+      ? codexAppServerUrl.trim().length > 0 &&
+        (codexAuthImported || codexAuthJson.trim().length > 0)
+      : openaiValidated;
 
   const copilotReady = copilotValidated;
 
@@ -352,6 +440,84 @@ export default function SetupPage() {
       setAwsError(err instanceof Error ? err.message : "Validation failed");
     }
     setLoading(false);
+  };
+
+  const startCodexLoginSession = async () => {
+    const repoUrl = codexLoginRepoUrl.trim();
+    const appServerUrl = codexAppServerUrl.trim();
+    if (!repoUrl) {
+      toast.error("Enter a repo URL for the Codex login session");
+      return;
+    }
+    if (!appServerUrl) {
+      toast.error("Enter the Codex app-server URL first");
+      return;
+    }
+    setCodexLoginLoading(true);
+    try {
+      const res = await api.startCodexAuthSession({ repoUrl, appServerUrl });
+      const sessionId = res.session.id;
+      setCodexAuthAccountId(res.account.id);
+      setCodexLoginSessionId(sessionId);
+      setCodexLoginRepoUrl(repoUrl);
+      setCodexAuthImported(false);
+      codexAutoImportAttemptedRef.current = null;
+      setCodexLoginStatus({
+        state: "starting",
+        canImport: false,
+        authDetected: false,
+        instructions: [
+          "The managed login session is starting.",
+          "Open the session tab and wait for Codex to print its login prompt.",
+        ],
+        sessionId,
+        repoUrl,
+        loginUrl: null,
+        userCode: null,
+        lastError: null,
+        logExcerpt: null,
+      });
+      if (typeof window !== "undefined") {
+        window.open(`/sessions/${sessionId}?setup=codex-login`, "_blank", "noopener,noreferrer");
+      }
+      toast.success("Opened managed Codex login session");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start Codex login session");
+    } finally {
+      setCodexLoginLoading(false);
+    }
+  };
+
+  const importCodexLoginFromSession = async (automatic = false) => {
+    if (!codexLoginSessionId) {
+      toast.error("Start a Codex login session first");
+      return;
+    }
+    setCodexImportLoading(true);
+    try {
+      await api.importCodexAuthFromSession(codexLoginSessionId);
+      setCodexAuthImported(true);
+      setCodexAuthJson("");
+      setCodexLoginStatus((current) =>
+        current
+          ? {
+              ...current,
+              state: "connected",
+              canImport: false,
+              authDetected: true,
+              instructions: ["Codex auth is connected and ready for future repo pods."],
+              lastError: null,
+            }
+          : current,
+      );
+      toast.success(automatic ? "Codex login detected and imported" : "Imported shared Codex login");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to import Codex login";
+      setCodexLoginStatus((current) => (current ? { ...current, lastError: message } : current));
+      toast.error(message);
+    } finally {
+      setCodexImportLoading(false);
+    }
   };
 
   const validateAnthropic = async (keyOverride?: string) => {
@@ -572,7 +738,12 @@ export default function SetupPage() {
       // Save Codex auth mode and credentials
       if (codexAuthMode === "app-server" && codexAppServerUrl.trim()) {
         await api.createSecret({ name: "CODEX_AUTH_MODE", value: "app-server" });
-        await api.createSecret({ name: "CODEX_APP_SERVER_URL", value: codexAppServerUrl.trim() });
+        const res = await api.saveCodexAuthAccount({
+          appServerUrl: codexAppServerUrl.trim(),
+          authJson: codexAuthJson.trim() || undefined,
+        });
+        setCodexAuthAccountId(res.account.id);
+        setCodexAuthImported(res.account.status === "connected");
       } else if (openaiKey.trim() && openaiValidated) {
         await api.createSecret({ name: "CODEX_AUTH_MODE", value: "api-key" });
         await api.createSecret({
@@ -1609,7 +1780,8 @@ export default function SetupPage() {
                             <input
                               type="text"
                               value={codexAppServerUrl}
-                              onChange={(e) => setCodexAppServerUrl(e.target.value)}
+                                onChange={(e) => setCodexAppServerUrl(e.target.value)}
+                                onInput={() => setCodexAuthImported(false)}
                               onPaste={(e) => {
                                 e.preventDefault();
                                 const pasted = e.clipboardData.getData("text").trim();
@@ -1626,6 +1798,137 @@ export default function SetupPage() {
                               <Check className="w-3 h-3" /> Endpoint configured
                             </span>
                           )}
+                          <div>
+                            <p className="text-xs text-text-muted mb-1.5">
+                              Codex login session repo:
+                            </p>
+                            <input
+                              type="text"
+                              value={codexLoginRepoUrl}
+                              onChange={(e) => setCodexLoginRepoUrl(e.target.value)}
+                              placeholder="https://github.com/owner/repo"
+                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
+                            />
+                            <p className="text-xs text-text-muted mt-1.5">
+                              Optio opens a managed terminal session on this repo, runs{" "}
+                              <code>codex login</code>, then imports the resulting shared login for
+                              future repo pods.
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-border bg-bg-card p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-medium">Guided login status</p>
+                                <p className="text-[11px] text-text-muted">
+                                  Status:{" "}
+                                  <code>{codexLoginStatus?.state ?? (codexStatusLoading ? "loading" : "not_started")}</code>
+                                </p>
+                              </div>
+                              {codexStatusLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-text-muted" />}
+                            </div>
+                            {codexLoginStatus?.instructions?.length ? (
+                              <ul className="text-xs text-text-muted space-y-1 list-disc pl-4">
+                                {codexLoginStatus.instructions.map((instruction) => (
+                                  <li key={instruction}>{instruction}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {codexLoginStatus?.loginUrl && (
+                              <p className="text-xs">
+                                <a
+                                  href={codexLoginStatus.loginUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-primary hover:underline inline-flex items-center gap-1"
+                                >
+                                  Open detected login URL <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </p>
+                            )}
+                            {codexLoginStatus?.userCode && (
+                              <p className="text-xs text-text-muted">
+                                Device code: <code>{codexLoginStatus.userCode}</code>
+                              </p>
+                            )}
+                            {codexLoginStatus?.lastError && (
+                              <p className="text-xs text-error flex items-start gap-1">
+                                <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                                <span>{codexLoginStatus.lastError}</span>
+                              </p>
+                            )}
+                            {codexLoginStatus?.logExcerpt && !codexLoginStatus.loginUrl && (
+                              <pre className="max-h-40 overflow-auto rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-muted whitespace-pre-wrap">
+                                {codexLoginStatus.logExcerpt}
+                              </pre>
+                            )}
+                            <p className="text-[11px] text-text-muted">
+                              Import runs automatically once Optio sees{" "}
+                              <code>/home/agent/.codex/auth.json</code> in the managed pod.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={startCodexLoginSession}
+                              disabled={codexLoginLoading}
+                              className="px-3 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                            >
+                              {codexLoginLoading ? "Starting..." : "Start Codex Login"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={importCodexLoginFromSession}
+                              disabled={!codexLoginStatus?.canImport || codexImportLoading}
+                              className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary disabled:opacity-50"
+                            >
+                              {codexImportLoading ? "Importing..." : "Import Login"}
+                            </button>
+                            {codexLoginSessionId && (
+                              <button
+                                type="button"
+                                onClick={() => window.open(`/sessions/${codexLoginSessionId}?setup=codex-login`, "_blank", "noopener,noreferrer")}
+                                className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary"
+                              >
+                                Reopen Login Session
+                              </button>
+                            )}
+                          </div>
+                          {codexLoginSessionId && (
+                            <p className="text-xs text-text-muted">
+                              Managed account: <code>{codexAuthAccountId || "pending"}</code>
+                              {" · "}
+                              Login session: <code>{codexLoginSessionId}</code>
+                            </p>
+                          )}
+                          {codexAuthImported && (
+                            <span className="text-xs text-success flex items-center gap-1">
+                              <Check className="w-3 h-3" /> Shared Codex login imported
+                            </span>
+                          )}
+                          <details className="pt-1">
+                            <summary className="text-xs text-text-muted cursor-pointer">
+                              Advanced: paste auth.json manually
+                            </summary>
+                            <div className="mt-2">
+                              <textarea
+                                value={codexAuthJson}
+                                onChange={(e) => {
+                                  setCodexAuthJson(e.target.value);
+                                  setCodexAuthImported(false);
+                                }}
+                                onPaste={(e) => {
+                                  e.preventDefault();
+                                  const pasted = e.clipboardData.getData("text");
+                                  if (pasted) {
+                                    setCodexAuthJson(pasted.trim());
+                                    setCodexAuthImported(false);
+                                  }
+                                }}
+                                placeholder='Paste ~/.codex/auth.json from a machine already logged into Codex'
+                                className="w-full min-h-32 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
+                              />
+                            </div>
+                          </details>
                         </div>
                       )}
                     </div>
