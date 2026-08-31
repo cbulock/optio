@@ -10,10 +10,14 @@ const CODEX_AUTH_PATH = "/home/agent/.codex/auth.json";
 const CODEX_LOGIN_LOG_PATH = "/tmp/optio-codex-login.log";
 
 function workspaceCondition(workspaceId?: string | null) {
-  return workspaceId ? eq(codexAuthAccounts.workspaceId, workspaceId) : isNull(codexAuthAccounts.workspaceId);
+  return workspaceId
+    ? eq(codexAuthAccounts.workspaceId, workspaceId)
+    : isNull(codexAuthAccounts.workspaceId);
 }
 
-async function collectExecOutput(session: ExecSession): Promise<{ stdout: string; stderr: string }> {
+async function collectExecOutput(
+  session: ExecSession,
+): Promise<{ stdout: string; stderr: string }> {
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
 
@@ -72,7 +76,10 @@ function buildInstructions(state: CodexAuthLoginStatus["state"], loginUrl: strin
     case "connected":
       return ["Codex auth is connected and ready for future repo pods."];
     case "ready_to_import":
-      return ["Codex login completed in the managed session.", "Import will finalize the shared login in Optio."];
+      return [
+        "Codex login completed in the managed session.",
+        "Import will finalize the shared login in Optio.",
+      ];
     case "waiting_for_login":
       return loginUrl
         ? [
@@ -104,15 +111,35 @@ function buildInstructions(state: CodexAuthLoginStatus["state"], loginUrl: strin
   }
 }
 
-function extractLoginDetails(logOutput: string) {
+function isLoopbackUrl(url: string) {
+  try {
+    const { hostname } = new URL(url);
+    const normalizedHostname = hostname.toLowerCase().replace(/\.+$/, "");
+    return (
+      normalizedHostname === "localhost" ||
+      normalizedHostname === "127.0.0.1" ||
+      normalizedHostname === "::1" ||
+      normalizedHostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rankLoginUrl(url: string) {
+  return /auth|login|device|openai|chatgpt/i.test(url) ? 0 : 1;
+}
+
+export function extractLoginDetails(logOutput: string) {
   const trimmed = logOutput.trim();
   const urls = Array.from(trimmed.matchAll(/https?:\/\/[^\s)<>"']+/g), (match) => match[0]);
   const uniqueUrls = Array.from(new Set(urls));
+  const nonLoopbackUrls = uniqueUrls.filter((url) => !isLoopbackUrl(url));
   const userCodeMatch =
     trimmed.match(/\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+\b/) ??
     trimmed.match(/(?:code|enter code)[^A-Z0-9]*([A-Z0-9-]{4,})/i);
   const loginUrl =
-    uniqueUrls.find((url) => /auth|login|device|openai|chatgpt/i.test(url)) ?? uniqueUrls[0] ?? null;
+    nonLoopbackUrls.sort((left, right) => rankLoginUrl(left) - rankLoginUrl(right))[0] ?? null;
 
   return {
     loginUrl,
@@ -177,16 +204,18 @@ export async function getCodexAppServerConfig(opts: {
   userId?: string | null;
 }) {
   const account = await getCodexAuthAccount(opts.workspaceId);
-  const codexAuthJson = (
-    await retrieveSecretWithFallback("CODEX_AUTH_JSON", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
-  const legacyUrl = (
-    await retrieveSecretWithFallback("CODEX_APP_SERVER_URL", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
+  const codexAuthJson = (await retrieveSecretWithFallback(
+    "CODEX_AUTH_JSON",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
+  const legacyUrl = (await retrieveSecretWithFallback(
+    "CODEX_APP_SERVER_URL",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
 
   return {
     appServerUrl: account?.appServerUrl ?? legacyUrl ?? undefined,
@@ -398,7 +427,9 @@ export async function getCodexAuthLoginStatus(input: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const state = /no pod assigned|pod is no longer available/i.test(message) ? "starting" : "error";
+    const state = /no pod assigned|pod is no longer available/i.test(message)
+      ? "starting"
+      : "error";
 
     return {
       account,
