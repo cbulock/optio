@@ -236,7 +236,12 @@ describe("getWsBaseUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
     Object.defineProperty(globalThis, "window", {
       value: {
-        location: { protocol: "http:", host: "localhost:30310" },
+        location: {
+          protocol: "http:",
+          host: "localhost:30310",
+          hostname: "localhost",
+          port: "30310",
+        },
         __OPTIO_CONFIG: { publicApiUrl: "http://localhost:30400" },
       },
       writable: true,
@@ -245,11 +250,33 @@ describe("getWsBaseUrl", () => {
     expect(getWsBaseUrl()).toBe("ws://localhost:30400");
   });
 
+  it("maps the local web NodePort to the API NodePort when no runtime config is injected", () => {
+    vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        location: {
+          protocol: "http:",
+          host: "192.168.1.50:30310",
+          hostname: "192.168.1.50",
+          port: "30310",
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+    expect(getWsBaseUrl()).toBe("ws://192.168.1.50:30400");
+  });
+
   it("returns ws:// + host for http: pages", () => {
     vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
     Object.defineProperty(globalThis, "window", {
       value: {
-        location: { protocol: "http:", host: "localhost:3000" },
+        location: {
+          protocol: "http:",
+          host: "localhost:3000",
+          hostname: "localhost",
+          port: "3000",
+        },
       },
       writable: true,
       configurable: true,
@@ -261,7 +288,12 @@ describe("getWsBaseUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
     Object.defineProperty(globalThis, "window", {
       value: {
-        location: { protocol: "https:", host: "optio.example.com" },
+        location: {
+          protocol: "https:",
+          host: "optio.example.com",
+          hostname: "optio.example.com",
+          port: "",
+        },
       },
       writable: true,
       configurable: true,

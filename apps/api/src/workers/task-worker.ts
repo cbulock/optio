@@ -45,6 +45,15 @@ import {
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
+import {
+  acquireCodexAuthLease,
+  getCodexTaskHome,
+  getCodexAppServerConfig,
+  noteCodexAuthFailure,
+  releaseCodexAuthLease,
+  syncCodexAuthFromRepoPod,
+  type CodexAuthLease,
+} from "../services/codex-auth-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
 import * as messageService from "../services/task-message-service.js";
@@ -112,6 +121,7 @@ export function startTaskWorker() {
       };
       const log = logger.child({ taskId, jobId: job.id });
       let repoPodId: string | null = null;
+      let codexAuthLease: CodexAuthLease | null = null;
 
       try {
         // Verify task is in queued state before proceeding
@@ -259,14 +269,15 @@ export function startTaskWorker() {
           ((await retrieveSecretWithFallback("CODEX_AUTH_MODE", "global", taskWorkspaceId).catch(
             () => null,
           )) as any) ?? "api-key";
-        const codexAppServerUrl =
+        const codexAppServerConfig =
           codexAuthMode === "app-server"
-            ? (((await retrieveSecretWithFallback(
-                "CODEX_APP_SERVER_URL",
-                "global",
-                taskWorkspaceId,
-              ).catch(() => null)) as any) ?? undefined)
-            : undefined;
+            ? await getCodexAppServerConfig({
+                workspaceId: taskWorkspaceId,
+                userId: currentTask.createdBy ?? null,
+              })
+            : null;
+        const codexAppServerUrl = codexAppServerConfig?.appServerUrl;
+        const codexAuthJson = codexAppServerConfig?.codexAuthJson;
         const geminiAuthMode =
           ((await retrieveSecretWithFallback("GEMINI_AUTH_MODE", "global", taskWorkspaceId).catch(
             () => null,
@@ -369,6 +380,7 @@ export function startTaskWorker() {
           claudeAuthMode,
           codexAuthMode,
           codexAppServerUrl,
+          codexAuthJson,
           optioApiUrl,
           renderedPrompt: finalRenderedPrompt,
           taskFileContent: finalTaskFileContent,
@@ -393,6 +405,19 @@ export function startTaskWorker() {
           googleCloudLocation,
           claudeVertexServiceAccountKey,
         });
+
+        if (task.agentType === "codex" && codexAuthMode === "app-server") {
+          if (!codexAppServerUrl) {
+            throw new Error(
+              "Codex app-server mode requires a managed Codex account app-server URL. Update the setup wizard.",
+            );
+          }
+          if (!codexAuthJson) {
+            throw new Error(
+              "Codex app-server mode requires shared Codex login data. Complete Codex login in setup and import it.",
+            );
+          }
+        }
 
         // ── MCP servers & custom skills injection ────────────────────
         const { getMcpServersForTask, buildMcpJsonContent } =
@@ -724,6 +749,13 @@ export function startTaskWorker() {
           }
         }
 
+        if (task.agentType === "codex" && codexAuthMode === "app-server") {
+          allEnv.OPTIO_CODEX_AUTH_JSON_B64 =
+            typeof codexAuthJson === "string" && codexAuthJson.length > 0
+              ? Buffer.from(codexAuthJson, "utf8").toString("base64")
+              : "";
+        }
+
         // Split env into pod-level (for repo-init.sh) and task-level (for exec).
         // Pod env must NOT contain user-specific secrets (API keys, OAuth tokens)
         // since the pod is shared across users. Secrets are only in task exec env.
@@ -816,6 +848,14 @@ export function startTaskWorker() {
         // exists as a tasks.taskType — external PR reviews run under
         // pr_review_runs via pr-review-worker.ts.
         const isReviewTask = !!reviewOverride || task.taskType === "review";
+        const codexAppServerRun = task.agentType === "codex" && codexAuthMode === "app-server";
+        if (codexAppServerRun) {
+          codexAuthLease = await acquireCodexAuthLease({
+            workspaceId: taskWorkspaceId,
+            owner: `task:${task.id}`,
+          });
+          log.info("Acquired exclusive Codex auth lease");
+        }
         const agentCommand = buildAgentCommand(task.agentType, allEnv, {
           resumeSessionId,
           resumePrompt,
@@ -1070,6 +1110,21 @@ export function startTaskWorker() {
         if (stderrData) {
           log.warn({ stderrPreview: stderrData.slice(0, 500) }, "Exec stderr output");
         }
+        if (codexAppServerRun) {
+          const handle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
+          try {
+            const synced = await syncCodexAuthFromRepoPod({
+              handle,
+              taskId: task.id,
+              workspaceId: taskWorkspaceId,
+            });
+            if (synced) {
+              log.info("Synced refreshed Codex auth back into Optio");
+            }
+          } catch (error) {
+            log.warn({ err: error }, "Failed to sync Codex auth from repo pod");
+          }
+        }
         // Before processing results, verify this worker still owns the task.
         // A force-redo may have reset the task while we were streaming.
         const taskAfterExec = await taskService.getTask(taskId);
@@ -1103,8 +1158,17 @@ export function startTaskWorker() {
             "task-worker",
           ).catch(() => {});
         }
-
-        await taskService.updateTaskResult(taskId, result.summary, result.error);
+        if (
+          codexAppServerRun &&
+          !result.success &&
+          /refresh_token_reused|401|not logged in|authentication/i.test(result.error ?? "")
+        ) {
+          await noteCodexAuthFailure({
+            workspaceId: taskWorkspaceId,
+            message: result.error ?? "Codex authentication failed",
+            clearStoredAuth: true,
+          }).catch(() => {});
+        }
 
         // Persist cost, token usage, and model data.
         //
@@ -1251,12 +1315,13 @@ export function startTaskWorker() {
         const outcome = classifyRunOutcome({
           success: result.success,
           isReviewTask,
+          hasOutput: allLogs.trim().length > 0,
           sessionId,
           detectedPrUrl,
         });
 
         if (outcome === "no_output") {
-          // Agent never started — no session ID means no agent output was produced.
+          // Agent never started — no output was produced at all.
           await repoPool.updateWorktreeState(taskId, "dirty");
           await taskService.transitionTask(
             taskId,
@@ -1291,6 +1356,11 @@ export function startTaskWorker() {
 
           // Planning mode: agent finished planning — wait for human approval
           if (isPlanningRun && !isReviewTask) {
+            await taskService.updateTaskResult(
+              taskId,
+              sanitizeTaskResultSummary(result.summary),
+              result.error,
+            );
             await repoPool.updateWorktreeState(taskId, "preserved");
             await taskService.transitionTask(
               taskId,
@@ -1306,6 +1376,7 @@ export function startTaskWorker() {
               isPlanningRun,
               hasRepoUrl: !!task.repoUrl,
               detectedPrUrl,
+              allowNoPr: task.metadata?.allowNoPr === true,
             })
           ) {
             // Repo Task completed without opening a PR. Before escalating,
@@ -1334,6 +1405,11 @@ export function startTaskWorker() {
                 "PR found via API fallback after successful agent exit",
               );
             } else {
+              await taskService.updateTaskResult(
+                taskId,
+                sanitizeTaskResultSummary(result.summary),
+                result.error,
+              );
               await repoPool.updateWorktreeState(taskId, "preserved");
               await taskService.transitionTask(
                 taskId,
@@ -1383,6 +1459,11 @@ export function startTaskWorker() {
               "PR found via API fallback — transitioning to pr_opened instead of failed",
             );
           } else {
+            await taskService.updateTaskResult(
+              taskId,
+              sanitizeTaskResultSummary(result.summary),
+              result.error,
+            );
             await repoPool.updateWorktreeState(taskId, "dirty");
             await taskService.transitionTask(
               taskId,
@@ -1540,6 +1621,9 @@ export function startTaskWorker() {
         // Drop the exec session from the cancellation registry (no-op if it
         // was already aborted by a cancel or never registered).
         unregisterActiveExec(taskId);
+        if (codexAuthLease) {
+          await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+        }
         // Release the task slot on the repo pod
         if (repoPodId) {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
@@ -1856,13 +1940,34 @@ export function buildAgentCommand(
       ];
     }
     case "codex": {
-      const appServerFlag =
-        env.OPTIO_CODEX_AUTH_MODE === "app-server" && env.OPTIO_CODEX_APP_SERVER_URL
-          ? ` --app-server ${shellQuote(env.OPTIO_CODEX_APP_SERVER_URL)}`
-          : "";
+      const appServerMode = env.OPTIO_CODEX_AUTH_MODE === "app-server";
+      const codexHome = getCodexTaskHome(env.OPTIO_TASK_ID ?? "task");
+      const codexSetup =
+        env.OPTIO_CODEX_AUTH_MODE === "app-server"
+          ? [
+              `export CODEX_HOME=${shellQuote(codexHome)}`,
+              `rm -rf "$CODEX_HOME"`,
+              `mkdir -p "$CODEX_HOME"`,
+              `printf 'cli_auth_credentials_store = "file"\n' > "$CODEX_HOME/config.toml"`,
+              `chmod 700 "$CODEX_HOME"`,
+              `chmod 600 "$CODEX_HOME/config.toml"`,
+              `if [ -n "${"$"}{OPTIO_CODEX_AUTH_JSON_B64:-}" ]; then printf '%s' "$OPTIO_CODEX_AUTH_JSON_B64" | base64 -d > "$CODEX_HOME/auth.json"; chmod 600 "$CODEX_HOME/auth.json"; fi`,
+            ]
+          : [
+              `export CODEX_HOME=${shellQuote(codexHome)}`,
+              `rm -rf "$CODEX_HOME"`,
+              `mkdir -p "$CODEX_HOME"`,
+              `printf 'cli_auth_credentials_store = "file"\n' > "$CODEX_HOME/config.toml"`,
+              `chmod 700 "$CODEX_HOME"`,
+              `echo "[optio] Logging in Codex with API key..."`,
+              `printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null || exit $?`,
+            ];
       return [
-        `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
-        `codex exec --full-auto "$OPTIO_PROMPT"${appServerFlag} --json`,
+        ...codexSetup,
+        `echo "[optio] Running OpenAI Codex${appServerMode ? " (app-server)" : ""}..."`,
+        appServerMode
+          ? `node .optio/codex-app-server-client.mjs`
+          : `codex exec --json --dangerously-bypass-approvals-and-sandbox "$OPTIO_PROMPT"`,
       ];
     }
     case "copilot": {
@@ -1943,7 +2048,7 @@ export function buildAgentCommand(
 /**
  * Classify how a finished agent run should be handled.
  *
- * - "no_output"  — agent produced no session/output at all (non-review only)
+ * - "no_output"  — agent produced no output at all (non-review only)
  * - "pr_opened"  — a PR was detected (non-review only; reviews never own a PR)
  * - "success"    — agent finished successfully
  * - "failure"    — agent failed; applies to review subtasks too. A review run
@@ -1955,12 +2060,18 @@ export function buildAgentCommand(
 export function classifyRunOutcome(opts: {
   success: boolean;
   isReviewTask: boolean;
+  hasOutput: boolean;
   sessionId: string | undefined;
   detectedPrUrl: string | undefined | null;
 }): "no_output" | "pr_opened" | "success" | "failure" {
-  if (!opts.sessionId && !opts.isReviewTask) return "no_output";
+  if (!opts.hasOutput && !opts.isReviewTask) return "no_output";
   if (opts.detectedPrUrl && !opts.isReviewTask) return "pr_opened";
   return opts.success ? "success" : "failure";
+}
+
+export function sanitizeTaskResultSummary(summary: string | undefined): string | undefined {
+  if (!summary) return undefined;
+  return summary.trim() === "Agent completed successfully" ? undefined : summary;
 }
 
 export function shouldEscalateNoPr(opts: {
@@ -1969,12 +2080,14 @@ export function shouldEscalateNoPr(opts: {
   isPlanningRun: boolean;
   hasRepoUrl: boolean;
   detectedPrUrl: string | undefined | null;
+  allowNoPr?: boolean;
 }): boolean {
   if (!opts.success) return false;
   if (opts.isReviewTask) return false;
   if (opts.isPlanningRun) return false;
   if (!opts.hasRepoUrl) return false;
   if (opts.detectedPrUrl) return false;
+  if (opts.allowNoPr) return false;
   return true;
 }
 

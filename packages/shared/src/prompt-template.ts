@@ -189,16 +189,28 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
    - Security: Any vulnerabilities introduced?
    - Style: Does it follow the repo's conventions?
 
-5. Submit your review:
-{{#if GIT_PLATFORM_CODECOMMIT}}   - If the code is good: \`aws codecommit update-pull-request-approval-state --pull-request-id {{PR_NUMBER}} --revision-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.revisionId' --output text) --approval-state APPROVE\` then \`aws codecommit post-comment-for-pull-request --pull-request-id {{PR_NUMBER}} --repository-name {{CODECOMMIT_REPO}} --before-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].destinationCommit' --output text) --after-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].sourceCommit' --output text) --content "Your review summary"\`
+5. Before submitting the review, determine whether the authenticated git user is the same person as the PR author:
+   \`\`\`
+{{#if GIT_PLATFORM_CODECOMMIT}}   aws sts get-caller-identity
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   glab api user --jq '.username'
+{{else}}   gh api user -q .login
+{{/if}}{{/if}}
+   \`\`\`
+   Compare that identity with the PR author shown in {{TASK_FILE}}.
+
+6. Submit your review:
+{{#if GIT_PLATFORM_CODECOMMIT}}   - If the code is good and you are NOT the PR author: \`aws codecommit update-pull-request-approval-state --pull-request-id {{PR_NUMBER}} --revision-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.revisionId' --output text) --approval-state APPROVE\` then \`aws codecommit post-comment-for-pull-request --pull-request-id {{PR_NUMBER}} --repository-name {{CODECOMMIT_REPO}} --before-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].destinationCommit' --output text) --after-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].sourceCommit' --output text) --content "Your review summary"\`
+   - If the code is good and you ARE the PR author: post a normal comment with \`aws codecommit post-comment-for-pull-request ...\` and do NOT attempt an approval.
    - If changes are needed: post a comment with \`aws codecommit post-comment-for-pull-request ...\` whose content starts with \`**[CHANGES REQUESTED]**\`
-{{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good and you are NOT the PR author: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
+   - If the code is good and you ARE the PR author: \`glab mr note {{PR_NUMBER}} --message "Review summary: Your review summary"\` and do NOT run \`glab mr approve\`
    - If changes are needed: \`glab mr note {{PR_NUMBER}} --message "Changes requested: What needs fixing"\`
-{{else}}   - If the code is good: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
+{{else}}   - If the code is good and you are NOT the PR author: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
+   - If the code is good and you ARE the PR author: \`gh pr comment {{PR_NUMBER}} --body "Review summary: Your review summary"\` and do NOT run \`gh pr review --approve\`
    - If changes are needed: \`gh pr review {{PR_NUMBER}} --request-changes --body "What needs fixing"\`
 {{/if}}{{/if}}
 
-6. After submitting your review, you are done. Do not review any other {{#if GIT_PLATFORM_GITLAB}}MRs{{else}}PRs{{/if}}.
+7. After submitting your review, you are done. Do not review any other {{#if GIT_PLATFORM_GITLAB}}MRs{{else}}PRs{{/if}}.
 
 ## Guidelines
 
@@ -208,7 +220,8 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 - Your job is to READ the diff and submit a review. That's it.
 - Only request changes for real issues, not style nitpicks.
 - Be specific about what needs fixing and why.
-- If the code correctly implements the task, approve it.
+- If the code correctly implements the task and you are not the PR author, approve it.
+- If you are the PR author, never attempt to approve your own PR; leave a comment-only review instead.
 `;
 
 export const REVIEW_TASK_FILE_PATH = ".optio/review-context.md";

@@ -119,6 +119,27 @@ describe("CodexAdapter", () => {
       expect(config.env.OPTIO_CODEX_APP_SERVER_URL).toBe("ws://localhost:3900/v1/connect");
     });
 
+    it("injects the app-server helper in app-server mode", () => {
+      const config = adapter.buildContainerConfig({
+        ...baseInput,
+        codexAuthMode: "app-server",
+      });
+      expect(
+        config.setupFiles?.some((file) => file.path === ".optio/codex-app-server-client.mjs"),
+      ).toBe(true);
+    });
+
+    it("does not inject auth.json as a setup file in app-server mode", () => {
+      const config = adapter.buildContainerConfig({
+        ...baseInput,
+        codexAuthMode: "app-server",
+        codexAuthJson: '{"account":"test"}',
+      });
+      expect(config.setupFiles?.some((file) => file.path === "/home/agent/.codex/auth.json")).toBe(
+        false,
+      );
+    });
+
     it("sets OPTIO_CODEX_AUTH_MODE to api-key by default", () => {
       const config = adapter.buildContainerConfig(baseInput);
       expect(config.env.OPTIO_CODEX_AUTH_MODE).toBe("api-key");

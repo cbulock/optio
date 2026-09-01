@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_REVIEW_PROMPT_TEMPLATE,
   renderPromptTemplate,
   renderTaskFile,
   TASK_FILE_PATH,
@@ -232,6 +233,25 @@ describe("CodeCommit branch in DEFAULT_PROMPT_TEMPLATE", () => {
     expect(result).toContain("gh pr create");
     expect(result).not.toContain("aws codecommit");
     expect(result).not.toContain("glab mr create");
+  });
+});
+
+describe("DEFAULT_REVIEW_PROMPT_TEMPLATE", () => {
+  it("tells GitHub reviewers to avoid self-approval and use comment-only fallback", () => {
+    const result = renderPromptTemplate(DEFAULT_REVIEW_PROMPT_TEMPLATE, {
+      PR_NUMBER: "42",
+      TASK_FILE: ".optio/review-context.md",
+      BASE_BRANCH: "main",
+      GIT_PLATFORM_GITLAB: "",
+      GIT_PLATFORM_CODECOMMIT: "",
+    });
+    expect(result).toContain("gh api user -q .login");
+    expect(result).toContain(
+      "Compare that identity with the PR author shown in .optio/review-context.md",
+    );
+    expect(result).toContain("gh pr comment 42 --body");
+    expect(result).toContain("do NOT run `gh pr review --approve`");
+    expect(result).toContain("never attempt to approve your own PR");
   });
 });
 

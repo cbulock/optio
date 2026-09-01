@@ -390,6 +390,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       />
 
       {/* Pending reason */}
+      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">
+            Initial Prompt
+          </div>
+          <pre className="whitespace-pre-wrap break-words text-sm text-text/85 font-mono">
+            {task.prompt}
+          </pre>
+        </div>
+      </div>
+
+      {/* Pending reason */}
       {pendingReason && (
         <div
           className={cn(

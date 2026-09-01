@@ -3,6 +3,8 @@ import { Sora, IBM_Plex_Mono } from "next/font/google";
 import { LayoutShell } from "@/components/layout/layout-shell";
 import "./globals.css";
 
+export const dynamic = "force-dynamic";
+
 const sora = Sora({
   subsets: ["latin"],
   variable: "--font-sora",
@@ -22,12 +24,33 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+function resolvePublicApiUrl(configuredUrl: string): string {
+  if (!configuredUrl) return "";
+
+  try {
+    const configured = new URL(configuredUrl);
+    const configuredIsLoopback =
+      configured.hostname === "localhost" || configured.hostname === "127.0.0.1";
+
+    // Don't inject a loopback API URL into browser HTML. It only works on the
+    // Optio host itself and breaks remote NodePort access. Let the client map
+    // the current web host (:30310) to the API host (:30400) instead.
+    if (configuredIsLoopback) {
+      return "";
+    }
+  } catch {
+    // Fall back to the configured value if parsing fails.
+  }
+
+  return configuredUrl;
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Inject runtime config so client-side code can derive the API WebSocket URL.
   // PUBLIC_API_URL is the browser-reachable API URL (e.g. http://localhost:30400
   // for local dev with NodePort, or empty for production ingress where web and
   // API share the same host).
-  const publicApiUrl = process.env.PUBLIC_API_URL ?? "";
+  const publicApiUrl = resolvePublicApiUrl(process.env.PUBLIC_API_URL ?? "");
 
   // Default to dark; ThemeProvider applies the correct class on mount
   return (

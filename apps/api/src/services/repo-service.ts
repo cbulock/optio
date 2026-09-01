@@ -173,6 +173,9 @@ export async function createRepo(data: {
       fullName: data.fullName,
       defaultBranch: data.defaultBranch ?? "main",
       isPrivate: data.isPrivate ?? false,
+      reviewEnabled: true,
+      reviewTrigger: "on_ci_pass",
+      autoResume: true,
       workspaceId,
     })
     .onConflictDoUpdate({

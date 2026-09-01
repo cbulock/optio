@@ -232,6 +232,28 @@ API ......... http://localhost:30400
 
 Open the web UI and the setup wizard will walk you through configuring GitHub access, agent credentials (API key or Max/Pro subscription), and adding your first repository.
 
+If you want to expose the local UI/API beyond the machine running Docker, create
+the bundled kind cluster with a non-loopback bind first:
+
+```bash
+./scripts/create-local-kind.sh --lan
+./scripts/setup-local.sh
+```
+
+The default `--lan` binding publishes:
+
+- Web UI on `http://<host-ip>:30310`
+- API on `http://<host-ip>:30400`
+
+If you already created `optio-local` with loopback-only port mappings, recreate
+it before expecting LAN access:
+
+```bash
+./scripts/create-local-kind.sh --delete
+./scripts/create-local-kind.sh --lan
+./scripts/setup-local.sh
+```
+
 ### Updating
 
 ```bash

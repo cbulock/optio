@@ -44,6 +44,14 @@ import {
 } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
+import {
+  acquireCodexAuthLease,
+  getCodexAppServerConfig,
+  noteCodexAuthFailure,
+  releaseCodexAuthLease,
+  syncCodexAuthFromRepoPod,
+  type CodexAuthLease,
+} from "../services/codex-auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -190,6 +198,7 @@ export function startPrReviewWorker() {
       });
 
       let repoPodId: string | null = null;
+      let codexAuthLease: CodexAuthLease | null = null;
       try {
         const { getRepoByUrl } = await import("../services/repo-service.js");
         const repoConfig = await getRepoByUrl(review.repoUrl, review.workspaceId ?? undefined);
@@ -238,14 +247,15 @@ export function startPrReviewWorker() {
           ((await retrieveSecretWithFallback("CODEX_AUTH_MODE", "global", workspaceId).catch(
             () => null,
           )) as "api-key" | "app-server" | null) ?? "api-key";
-        const codexAppServerUrl =
+        const codexAppServerConfig =
           codexAuthMode === "app-server"
-            ? (((await retrieveSecretWithFallback(
-                "CODEX_APP_SERVER_URL",
-                "global",
+            ? await getCodexAppServerConfig({
                 workspaceId,
-              ).catch(() => null)) as string | undefined) ?? undefined)
-            : undefined;
+                userId,
+              })
+            : null;
+        const codexAppServerUrl = codexAppServerConfig?.appServerUrl;
+        const codexAuthJson = codexAppServerConfig?.codexAuthJson;
         const geminiAuthMode =
           ((await retrieveSecretWithFallback("GEMINI_AUTH_MODE", "global", workspaceId).catch(
             () => null,
@@ -312,6 +322,7 @@ export function startPrReviewWorker() {
           claudeAuthMode: claudeAuthMode as "api-key" | "max-subscription",
           codexAuthMode,
           codexAppServerUrl,
+          codexAuthJson,
           optioApiUrl,
           renderedPrompt,
           taskFileContent,
@@ -335,6 +346,19 @@ export function startPrReviewWorker() {
           googleCloudProject,
           googleCloudLocation,
         });
+
+        if (agentType === "codex" && codexAuthMode === "app-server") {
+          if (!codexAppServerUrl) {
+            throw new Error(
+              "Codex app-server mode requires a managed Codex account app-server URL. Update the setup wizard.",
+            );
+          }
+          if (!codexAuthJson) {
+            throw new Error(
+              "Codex app-server mode requires shared Codex login data. Complete Codex login in setup and import it.",
+            );
+          }
+        }
 
         // ── MCP + connections + skills (shared with task-worker) ──
         const { getMcpServersForTask, buildMcpJsonContent } =
@@ -478,6 +502,13 @@ export function startPrReviewWorker() {
           }
         }
 
+        if (agentType === "codex" && codexAuthMode === "app-server") {
+          allEnv.OPTIO_CODEX_AUTH_JSON_B64 =
+            typeof codexAuthJson === "string" && codexAuthJson.length > 0
+              ? Buffer.from(codexAuthJson, "utf8").toString("base64")
+              : "";
+        }
+
         // ── Pod provisioning ──────────────────────────────────────
         const podEnv: Record<string, string> = {
           OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
@@ -541,6 +572,14 @@ export function startPrReviewWorker() {
         await transitionRun(runId, PrReviewRunState.RUNNING);
 
         // ── Build command + exec ─────────────────────────────────
+        const codexAppServerRun = agentType === "codex" && codexAuthMode === "app-server";
+        if (codexAppServerRun) {
+          codexAuthLease = await acquireCodexAuthLease({
+            workspaceId,
+            owner: `pr-review:${run.id}`,
+          });
+          log.info("Acquired exclusive Codex auth lease");
+        }
         const agentCommand = buildAgentCommand(agentType, allEnv, {
           resumeSessionId: run.resumeSessionId ?? undefined,
           isReview: true,
@@ -657,10 +696,36 @@ export function startPrReviewWorker() {
         if (stderrData) {
           log.warn({ stderrPreview: stderrData.slice(0, 500) }, "Exec stderr");
         }
+        if (codexAppServerRun) {
+          const handle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
+          try {
+            const synced = await syncCodexAuthFromRepoPod({
+              handle,
+              taskId: run.id,
+              workspaceId,
+            });
+            if (synced) {
+              log.info("Synced refreshed Codex auth back into Optio");
+            }
+          } catch (error) {
+            log.warn({ err: error }, "Failed to sync Codex auth from repo pod");
+          }
+        }
 
         // ── Parse result ────────────────────────────────────────
         const inferredExitCode = inferExitCode(agentType, allLogs);
         const result = adapter.parseResult(inferredExitCode, allLogs);
+        if (
+          codexAppServerRun &&
+          !result.success &&
+          /refresh_token_reused|401|not logged in|authentication/i.test(result.error ?? "")
+        ) {
+          await noteCodexAuthFailure({
+            workspaceId,
+            message: result.error ?? "Codex authentication failed",
+            clearStoredAuth: true,
+          }).catch(() => {});
+        }
 
         const costFields: Record<string, unknown> = {
           resultSummary: result.summary,
@@ -718,6 +783,9 @@ export function startPrReviewWorker() {
             .catch(() => {});
         }
       } finally {
+        if (codexAuthLease) {
+          await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+        }
         if (repoPodId) {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
           await repoPool.updateWorktreeState(run.id, "removed").catch(() => {});

@@ -494,7 +494,7 @@ describe("PR_OPENED — combined signals", () => {
     }
   });
 
-  it("CI passing stale (already seen) → no launchReview re-trigger", () => {
+  it("CI passing steady with no review subtask still launches review for recovery", () => {
     const s = repoSnapshot(
       {},
       {
@@ -523,7 +523,7 @@ describe("PR_OPENED — combined signals", () => {
       },
     );
     const action = reconcileRepo(s);
-    expect(action.kind).not.toBe("launchReview");
+    expect(action.kind).toBe("launchReview");
   });
 
   it("auto-merge with existing review subtask still allowed if review passed", () => {

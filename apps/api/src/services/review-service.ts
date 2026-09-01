@@ -22,12 +22,19 @@ async function fetchPrContext(
   prNumber: number,
   createdBy: string | null,
 ): Promise<{
+  prAuthor: string;
   prDescription: string;
   existingReviews: string;
   prComments: string;
   inlineComments: string;
 }> {
-  const result = { prDescription: "", existingReviews: "", prComments: "", inlineComments: "" };
+  const result = {
+    prAuthor: "",
+    prDescription: "",
+    existingReviews: "",
+    prComments: "",
+    inlineComments: "",
+  };
   try {
     const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
       userId: createdBy ?? undefined,
@@ -37,6 +44,7 @@ async function fetchPrContext(
     // Fetch PR description
     try {
       const prData = await platform.getPullRequest(ri, prNumber);
+      result.prAuthor = prData.author;
       result.prDescription = prData.body;
     } catch {}
 
@@ -159,6 +167,7 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     `- URL: ${parentTask.prUrl}`,
     `- Number: #${prNumber}`,
     `- Branch: optio/task-${parentTask.id}`,
+    `- Author: ${prContext.prAuthor || "unknown"}`,
   ];
 
   if (prContext.prDescription) {

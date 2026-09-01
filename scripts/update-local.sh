@@ -8,6 +8,26 @@ cd "$ROOT_DIR"
 QUICK=false
 SKIP_PULL=false
 
+load_kind_images() {
+  if ! command -v kind >/dev/null 2>&1; then
+    return
+  fi
+
+  local current_context
+  current_context="$(kubectl config current-context 2>/dev/null || true)"
+  if [[ "$current_context" != kind-* ]]; then
+    return
+  fi
+
+  local cluster_name="${current_context#kind-}"
+  if ! kind get clusters 2>/dev/null | grep -qx "$cluster_name"; then
+    return
+  fi
+
+  echo "[4/5] Loading images into kind cluster '$cluster_name'..."
+  kind load docker-image "$@" --name "$cluster_name"
+}
+
 usage() {
   echo "Usage: update-local.sh [OPTIONS]"
   echo ""
@@ -31,18 +51,18 @@ echo ""
 
 # Pull latest code
 if [ "$SKIP_PULL" = false ]; then
-  echo "[1/4] Pulling latest code..."
+echo "[1/5] Pulling latest code..."
   git pull --rebase
 else
-  echo "[1/4] Skipping git pull"
+  echo "[1/5] Skipping git pull"
 fi
 
 # Install any new dependencies
-echo "[2/4] Installing dependencies..."
+echo "[2/5] Installing dependencies..."
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
 # Build images
-echo "[3/4] Building images..."
+echo "[3/5] Building images..."
 
 # API and Web always build in parallel
 docker build -t optio-api:latest -f Dockerfile.api . -q &
@@ -50,27 +70,26 @@ API_PID=$!
 docker build -t optio-web:latest -f Dockerfile.web . -q &
 WEB_PID=$!
 
+AGENT_IMAGES=()
 if [ "$QUICK" = false ]; then
-  # Check if any agent image needs rebuilding
-  REBUILD_AGENTS=false
-  for preset in base node python go rust full; do
-    if ! docker image inspect "optio-${preset}:latest" &>/dev/null; then
-      REBUILD_AGENTS=true
-      break
-    fi
-  done
-
-  if [ "$REBUILD_AGENTS" = true ]; then
-    echo "   Rebuilding agent images (new presets detected)..."
-    docker build -t optio-base:latest -f images/base.Dockerfile . -q
-    docker tag optio-base:latest optio-agent:latest
-    docker build -t optio-node:latest -f images/node.Dockerfile . -q &
-    docker build -t optio-python:latest -f images/python.Dockerfile . -q &
-    docker build -t optio-go:latest -f images/go.Dockerfile . -q &
-    docker build -t optio-rust:latest -f images/rust.Dockerfile . -q &
-    wait
-    docker build -t optio-full:latest -f images/full.Dockerfile . -q
-  fi
+  echo "   Rebuilding agent images..."
+  docker build -t optio-base:latest -f images/base.Dockerfile . -q
+  docker tag optio-base:latest optio-agent:latest
+  docker build -t optio-node:latest -f images/node.Dockerfile . -q &
+  docker build -t optio-python:latest -f images/python.Dockerfile . -q &
+  docker build -t optio-go:latest -f images/go.Dockerfile . -q &
+  docker build -t optio-rust:latest -f images/rust.Dockerfile . -q &
+  wait
+  docker build -t optio-full:latest -f images/full.Dockerfile . -q
+  AGENT_IMAGES=(
+    optio-base:latest
+    optio-agent:latest
+    optio-node:latest
+    optio-python:latest
+    optio-go:latest
+    optio-rust:latest
+    optio-full:latest
+  )
 
   # Rebuild optio-optio if missing
   if ! docker image inspect "optio-optio:latest" &>/dev/null; then
@@ -83,9 +102,17 @@ fi
 wait $API_PID || { echo "API image build failed"; exit 1; }
 wait $WEB_PID || { echo "Web image build failed"; exit 1; }
 echo "   Images built."
+KIND_IMAGES=(optio-api:latest optio-web:latest)
+if [ "$QUICK" = false ] && docker image inspect "optio-optio:latest" &>/dev/null; then
+  KIND_IMAGES+=(optio-optio:latest)
+fi
+if [ "$QUICK" = false ]; then
+  KIND_IMAGES+=("${AGENT_IMAGES[@]}")
+fi
+load_kind_images "${KIND_IMAGES[@]}"
 
 # Rolling restart
-echo "[4/4] Restarting deployments..."
+echo "[5/5] Restarting deployments..."
 # NOTE: --reset-then-reuse-values carries forward the release's existing values,
 # including encryption.key. Never pass a freshly generated encryption key here —
 # rotating it invalidates all stored secrets (see issue #553 and setup-local.sh).

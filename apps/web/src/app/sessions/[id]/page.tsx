@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -38,8 +39,34 @@ import { SessionChat } from "@/components/session-chat";
 import { SplitPane } from "@/components/split-pane";
 import { ErrorBoundary } from "@/components/error-boundary";
 
+interface CodexLoginStatusResponse {
+  account: {
+    id: string;
+    status: string;
+    appServerUrl: string;
+    loginSessionId: string | null;
+    loginSessionRepoUrl: string | null;
+    lastImportedAt: string | null;
+    lastValidatedAt: string | null;
+    lastError: string | null;
+  } | null;
+  login: {
+    state: string;
+    canImport: boolean;
+    authDetected: boolean;
+    instructions: string[];
+    sessionId: string | null;
+    repoUrl: string | null;
+    loginUrl: string | null;
+    userCode: string | null;
+    lastError: string | null;
+    logExcerpt: string | null;
+  };
+}
+
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<any>(null);
   const [modelConfig, setModelConfig] = useState<{
     claudeModel: string;
@@ -52,6 +79,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const [liveCost, setLiveCost] = useState<number>(0);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [codexAuthStatus, setCodexAuthStatus] = useState<CodexLoginStatusResponse | null>(null);
+  const [codexAuthStatusLoading, setCodexAuthStatusLoading] = useState(false);
+  const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const codexAutoImportAttemptedRef = useRef<string | null>(null);
 
   // Ref for "send to agent" handler
   const sendToAgentRef = useRef<((text: string) => void) | null>(null);
@@ -114,6 +145,76 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const handleSendToAgentRegister = useCallback((handler: (text: string) => void) => {
     sendToAgentRef.current = handler;
   }, []);
+  const codexLoginMode = searchParams.get("setup") === "codex-login";
+  const sessionRepoUrl = session?.repoUrl ?? null;
+  const codexLoginCommand = codexLoginMode
+    ? 'export CODEX_HOME="/home/agent/.codex"\nmkdir -p "$CODEX_HOME"\nprintf \'cli_auth_credentials_store = "file"\\n\' > "$CODEX_HOME/config.toml"\nchmod 700 "$CODEX_HOME"\nchmod 600 "$CODEX_HOME/config.toml"\nrm -f /tmp/optio-codex-login.log\nprintf \'Optio managed Codex login\\nStarting device-auth flow.\\nUse the verification URL and device code below.\\nLeave this session open until setup says the login was imported.\\n\\n\' | tee -a /tmp/optio-codex-login.log\ncodex login --device-auth 2>&1 | tee -a /tmp/optio-codex-login.log\n'
+    : undefined;
+
+  const fetchCodexAuthStatus = useCallback(async () => {
+    if (!codexLoginMode) return;
+
+    setCodexAuthStatusLoading(true);
+    try {
+      const res = await api.getCodexAuthAccount();
+      setCodexAuthStatus(res);
+    } catch (err) {
+      setCodexAuthStatus({
+        account: null,
+        login: {
+          state: "error",
+          canImport: false,
+          authDetected: false,
+          instructions: [
+            "Optio could not load the managed Codex login state.",
+            "Reload the page or return to Settings to retry.",
+          ],
+          sessionId: id,
+          repoUrl: sessionRepoUrl,
+          loginUrl: null,
+          userCode: null,
+          lastError: err instanceof Error ? err.message : "Failed to load Codex login status",
+          logExcerpt: null,
+        },
+      });
+    } finally {
+      setCodexAuthStatusLoading(false);
+    }
+  }, [codexLoginMode, id, sessionRepoUrl]);
+
+  const importCodexLogin = useCallback(async () => {
+    setCodexImportLoading(true);
+    try {
+      await api.importCodexAuthFromSession(id);
+      toast.success("Imported shared Codex login");
+      await fetchCodexAuthStatus();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to import Codex login");
+      throw err;
+    } finally {
+      setCodexImportLoading(false);
+    }
+  }, [fetchCodexAuthStatus, id]);
+
+  useEffect(() => {
+    if (!codexLoginMode) return;
+
+    fetchCodexAuthStatus();
+    const interval = setInterval(() => {
+      fetchCodexAuthStatus().catch(() => {});
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [codexLoginMode, fetchCodexAuthStatus]);
+
+  useEffect(() => {
+    if (!codexLoginMode || !codexAuthStatus?.login.canImport || codexImportLoading) return;
+    if (codexAutoImportAttemptedRef.current === id) return;
+
+    codexAutoImportAttemptedRef.current = id;
+    importCodexLogin().catch(() => {
+      codexAutoImportAttemptedRef.current = null;
+    });
+  }, [codexAuthStatus?.login.canImport, codexImportLoading, codexLoginMode, id, importCodexLogin]);
 
   if (loading) {
     return (
@@ -248,6 +349,100 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {codexLoginMode && (
+        <>
+          <div className="shrink-0 px-6 py-3 border-b border-primary/20 bg-primary/5 text-sm">
+            This session is set up for managed Codex login. The terminal auto-starts{" "}
+            <code>codex login</code>, keeps a login transcript for Setup/Settings to read, and
+            should stay open until Optio reports that the shared auth was imported.
+          </div>
+          <div className="shrink-0 px-6 py-4 border-b border-border bg-bg-card/60">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Guided Codex login</p>
+                <p className="text-xs text-text-muted mt-1">
+                  Status:{" "}
+                  <code>
+                    {codexAuthStatus?.login.state ??
+                      (codexAuthStatusLoading ? "loading" : "starting")}
+                  </code>
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => fetchCodexAuthStatus()}
+                  disabled={codexAuthStatusLoading}
+                  className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary disabled:opacity-50"
+                >
+                  {codexAuthStatusLoading ? "Refreshing..." : "Refresh Status"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => importCodexLogin()}
+                  disabled={!codexAuthStatus?.login.canImport || codexImportLoading}
+                  className="px-3 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {codexImportLoading ? "Importing..." : "Import Login"}
+                </button>
+                <Link
+                  href="/settings"
+                  className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary"
+                >
+                  Open Settings
+                </Link>
+              </div>
+            </div>
+
+            {codexAuthStatus?.login.instructions?.length ? (
+              <ul className="mt-3 text-xs text-text-muted space-y-1 list-disc pl-4">
+                {codexAuthStatus.login.instructions.map((instruction) => (
+                  <li key={instruction}>{instruction}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            {codexAuthStatus?.login.loginUrl && (
+              <p className="mt-3 text-xs">
+                <a
+                  href={codexAuthStatus.login.loginUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  Open device verification page <ExternalLink className="w-3 h-3" />
+                </a>
+              </p>
+            )}
+
+            {codexAuthStatus?.login.userCode && (
+              <p className="mt-2 text-xs text-text-muted">
+                Device code: <code>{codexAuthStatus.login.userCode}</code>
+              </p>
+            )}
+
+            {codexAuthStatus?.login.lastError && (
+              <p className="mt-2 text-xs text-error flex items-start gap-1">
+                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                <span>{codexAuthStatus.login.lastError}</span>
+              </p>
+            )}
+
+            {codexAuthStatus?.login.logExcerpt && !codexAuthStatus.login.loginUrl && (
+              <pre className="mt-3 max-h-40 overflow-auto rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-muted whitespace-pre-wrap">
+                {codexAuthStatus.login.logExcerpt}
+              </pre>
+            )}
+
+            {codexAuthStatus?.account && (
+              <p className="mt-3 text-xs text-text-muted">
+                Managed account: <code>{codexAuthStatus.account.id}</code>
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
       {/* End session warning dialog */}
       {showEndWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -300,7 +495,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             right={
               <div className="h-full flex flex-col">
                 <ErrorBoundary label="Terminal">
-                  <SessionTerminal sessionId={id} />
+                  <SessionTerminal sessionId={id} initialCommand={codexLoginCommand} />
                 </ErrorBoundary>
                 {/* PR cards inline below terminal when present */}
                 {prs.length > 0 && (

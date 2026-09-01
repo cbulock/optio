@@ -64,13 +64,13 @@ export default function NewRepoPage() {
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
 
   // Step 4: Review
-  const [reviewEnabled, setReviewEnabled] = useState(false);
+  const [reviewEnabled, setReviewEnabled] = useState(true);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   // null = inherit from repo's defaultAgentType / global setting.
   const [reviewAgentType, setReviewAgentType] = useState<AgentType | null>(null);
   const [reviewModel, setReviewModel] = useState("");
   const [testCommand, setTestCommand] = useState("");
-  const [autoResume, setAutoResume] = useState(false);
+  const [autoResume, setAutoResume] = useState(true);
   const [autoMerge, setAutoMerge] = useState(false);
 
   // Creating

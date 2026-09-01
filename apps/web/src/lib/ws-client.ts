@@ -109,6 +109,13 @@ export function getWsBaseUrl(): string {
     const protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${url.host}`;
   }
+  // Local kind installs expose web and API on separate NodePorts. If the user
+  // is browsing the web UI directly on the web NodePort, route WebSockets to
+  // the matching API NodePort automatically.
+  if (window.location.port === "30310") {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.hostname}:30400`;
+  }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}`;
 }

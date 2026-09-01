@@ -582,6 +582,20 @@
       "when": 1786405459000,
       "tag": "1786405459_cursor_repo_model",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1786450000000,
+      "tag": "1786450000_codex_auth_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1788289500000,
+      "tag": "1788289500_codex_auth_leases",
+      "breakpoints": true
     }
   ]
 }

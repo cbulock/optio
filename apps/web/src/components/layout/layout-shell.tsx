@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { GlobalWebSocketProvider } from "./ws-provider";
@@ -19,7 +19,11 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      {!isLogin && <SetupCheck />}
+      {!isLogin && (
+        <Suspense fallback={null}>
+          <SetupCheck />
+        </Suspense>
+      )}
       {!isLogin && <GlobalWebSocketProvider />}
       {!isLogin && !isSetup && <PushSwRegistrar />}
       {isSetup || isLogin ? (

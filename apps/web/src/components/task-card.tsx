@@ -34,6 +34,7 @@ function formatAttentionReason(reason: string): string {
 interface TaskSummary {
   id: string;
   title: string;
+  prompt?: string;
   state: string;
   agentType: string;
   repoUrl: string;
@@ -99,6 +100,9 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
             <StateBadge state={task.state} isStalled={task.isStalled} />
           </div>
         </div>
+
+        {/* Blocked / waiting on deps indicator */}
+        {task.prompt && <p className="mt-3 text-xs text-text-muted line-clamp-2">{task.prompt}</p>}
 
         {/* Blocked / waiting on deps indicator */}
         {task.state === "waiting_on_deps" && (

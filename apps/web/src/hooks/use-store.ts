@@ -3,6 +3,7 @@ import { create } from "zustand";
 export interface TaskSummary {
   id: string;
   title: string;
+  prompt?: string;
   state: string;
   agentType: string;
   repoUrl: string;

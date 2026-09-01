@@ -435,10 +435,11 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     };
   }
 
-  // CI just passed → trigger review if configured for on_ci_pass.
+  // CI passing with no review subtask → trigger review if configured for
+  // on_ci_pass. This intentionally recovers when the original "pending ->
+  // passing" edge was missed due to a restart or other transient race.
   if (
     pr.checksStatus === "passing" &&
-    prev.checks !== "passing" &&
     pr.state === "open" &&
     snapshot.settings.reviewEnabled &&
     snapshot.settings.reviewTrigger === "on_ci_pass" &&
