@@ -828,6 +828,16 @@ export const api = {
         lastValidatedAt: string | null;
         lastError: string | null;
       } | null;
+      login: {
+        state: string;
+        canImport: boolean;
+        authDetected: boolean;
+        sessionId: string | null;
+        repoUrl: string | null;
+        loginUrl: string | null;
+        userCode: string | null;
+        lastError: string | null;
+      };
     }>("/api/setup/codex-auth"),
 
   startCodexAuthSession: (data: { repoUrl: string; appServerUrl: string }) =>

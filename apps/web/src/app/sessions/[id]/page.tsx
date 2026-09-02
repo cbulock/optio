@@ -139,7 +139,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const displayCost = liveCost > 0 ? liveCost : session.costUsd ? parseFloat(session.costUsd) : 0;
   const codexLoginMode = searchParams.get("setup") === "codex-login";
   const codexLoginCommand = codexLoginMode
-    ? 'export CODEX_HOME="/home/agent/.codex"\nmkdir -p "$CODEX_HOME"\nprintf \'cli_auth_credentials_store = "file"\\n\' > "$CODEX_HOME/config.toml"\nchmod 700 "$CODEX_HOME"\nchmod 600 "$CODEX_HOME/config.toml"\ncodex login\n'
+    ? 'export CODEX_HOME="/home/agent/.codex"\nmkdir -p "$CODEX_HOME"\nprintf \'cli_auth_credentials_store = "file"\\n\' > "$CODEX_HOME/config.toml"\nchmod 700 "$CODEX_HOME"\nchmod 600 "$CODEX_HOME/config.toml"\ncodex login --device-auth\n'
     : undefined;
 
   return (
@@ -314,7 +314,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             right={
               <div className="h-full flex flex-col">
                 <ErrorBoundary label="Terminal">
-                      <SessionTerminal sessionId={id} initialCommand={codexLoginCommand} />
+                  <SessionTerminal sessionId={id} initialCommand={codexLoginCommand} />
                 </ErrorBoundary>
                 {/* PR cards inline below terminal when present */}
                 {prs.length > 0 && (

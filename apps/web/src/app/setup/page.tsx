@@ -113,7 +113,8 @@ export default function SetupPage() {
   const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
   const [codexImportLoading, setCodexImportLoading] = useState(false);
-  const [codexDeviceCode] = useState<string | null>(null);
+  const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
+  const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
 
   // Step 3: Copilot token
   const [copilotToken, setCopilotToken] = useState("");
@@ -212,15 +213,34 @@ export default function SetupPage() {
     api
       .getCodexAuthAccount()
       .then((res) => {
-        if (!res.account) return;
-        setCodexAuthAccountId(res.account.id);
-        setCodexAppServerUrl(res.account.appServerUrl);
-        setCodexLoginSessionId(res.account.loginSessionId ?? "");
-        setCodexLoginRepoUrl(res.account.loginSessionRepoUrl ?? "");
-        setCodexAuthImported(res.account.status === "connected");
+        if (res.account) {
+          setCodexAuthAccountId(res.account.id);
+          setCodexAppServerUrl(res.account.appServerUrl);
+          setCodexLoginSessionId(res.account.loginSessionId ?? "");
+          setCodexLoginRepoUrl(res.account.loginSessionRepoUrl ?? "");
+          setCodexAuthImported(res.account.status === "connected");
+        }
+        setCodexDeviceCode(res.login.userCode);
+        setCodexDeviceLoginUrl(res.login.loginUrl);
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!codexLoginSessionId || codexAuthImported) return;
+    const refresh = () =>
+      api
+        .getCodexAuthAccount()
+        .then((res) => {
+          setCodexDeviceCode(res.login.userCode);
+          setCodexDeviceLoginUrl(res.login.loginUrl);
+          if (res.account?.status === "connected") setCodexAuthImported(true);
+        })
+        .catch(() => {});
+    void refresh();
+    const interval = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(interval);
+  }, [codexLoginSessionId, codexAuthImported]);
 
   // Check if OAuth token is already stored when reaching the agents step
   useEffect(() => {
@@ -1315,7 +1335,6 @@ export default function SetupPage() {
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <CodexDeviceCode deviceCode={codexDeviceCode} />
                   <label
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-md border transition-colors",
@@ -1721,6 +1740,17 @@ export default function SetupPage() {
                               <Check className="w-3 h-3" /> Endpoint configured
                             </span>
                           )}
+                          {codexDeviceLoginUrl && (
+                            <a
+                              href={codexDeviceLoginUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block text-xs text-primary hover:underline"
+                            >
+                              Open Codex verification page
+                            </a>
+                          )}
+                          <CodexDeviceCode deviceCode={codexDeviceCode} />
                           <div>
                             <p className="text-xs text-text-muted mb-1.5">
                               Codex login session repo:

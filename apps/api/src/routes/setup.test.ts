@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 const mockListSecrets = vi.fn();
 const mockRetrieveSecret = vi.fn();
 const mockGetCodexAuthAccount = vi.fn();
+const mockGetCodexAuthLoginStatus = vi.fn();
 const mockUpsertCodexAuthAccount = vi.fn();
 const mockImportCodexAuthFromSession = vi.fn();
 const mockStartCodexAuthSession = vi.fn();
@@ -17,6 +18,7 @@ vi.mock("../services/secret-service.js", () => ({
 }));
 vi.mock("../services/codex-auth-service.js", () => ({
   getCodexAuthAccount: (...args: unknown[]) => mockGetCodexAuthAccount(...args),
+  getCodexAuthLoginStatus: (...args: unknown[]) => mockGetCodexAuthLoginStatus(...args),
   upsertCodexAuthAccount: (...args: unknown[]) => mockUpsertCodexAuthAccount(...args),
   importCodexAuthFromSession: (...args: unknown[]) => mockImportCodexAuthFromSession(...args),
   startCodexAuthSession: (...args: unknown[]) => mockStartCodexAuthSession(...args),
@@ -303,14 +305,27 @@ describe("GET /api/setup/codex-auth", () => {
   });
 
   it("returns null when no account exists", async () => {
-    mockGetCodexAuthAccount.mockResolvedValue(null);
+    mockGetCodexAuthLoginStatus.mockResolvedValue({
+      account: null,
+      login: {
+        state: "not_started",
+        canImport: false,
+        authDetected: false,
+        sessionId: null,
+        repoUrl: null,
+        loginUrl: null,
+        userCode: null,
+        lastError: null,
+      },
+    });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ account: null });
+    expect(res.json().account).toBeNull();
+    expect(res.json().login.state).toBe("not_started");
   });
 
   it("returns the managed account summary", async () => {
-    mockGetCodexAuthAccount.mockResolvedValue({
+    const account = {
       id: "acct-1",
       status: "connected",
       appServerUrl: "ws://localhost:3900/v1/connect",
@@ -319,6 +334,19 @@ describe("GET /api/setup/codex-auth", () => {
       lastImportedAt: new Date("2026-08-30T14:00:00.000Z"),
       lastValidatedAt: null,
       lastError: null,
+    };
+    mockGetCodexAuthLoginStatus.mockResolvedValue({
+      account,
+      login: {
+        state: "connected",
+        canImport: false,
+        authDetected: true,
+        sessionId: "sess-1",
+        repoUrl: "https://github.com/owner/repo",
+        loginUrl: null,
+        userCode: null,
+        lastError: null,
+      },
     });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
     expect(res.statusCode).toBe(200);
@@ -352,7 +380,7 @@ describe("POST /api/setup/codex-auth", () => {
       url: "/api/setup/codex-auth",
       payload: {
         appServerUrl: "ws://localhost:3900/v1/connect",
-        authJson: "{\"token\":\"abc\"}",
+        authJson: '{"token":"abc"}',
       },
     });
 
@@ -361,7 +389,7 @@ describe("POST /api/setup/codex-auth", () => {
       workspaceId: "ws-1",
       userId: "u1",
       appServerUrl: "ws://localhost:3900/v1/connect",
-      authJson: "{\"token\":\"abc\"}",
+      authJson: '{"token":"abc"}',
     });
     expect(res.json().account.status).toBe("connected");
   });

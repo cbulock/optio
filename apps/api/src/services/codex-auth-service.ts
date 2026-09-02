@@ -6,11 +6,79 @@ import { getRuntime } from "./container-service.js";
 import { retrieveSecretWithFallback, storeSecret } from "./secret-service.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 
-function workspaceCondition(workspaceId?: string | null) {
-  return workspaceId ? eq(codexAuthAccounts.workspaceId, workspaceId) : isNull(codexAuthAccounts.workspaceId);
+const CODEX_AUTH_PATH = "/home/agent/.codex/auth.json";
+const CODEX_LOGIN_LOG_PATH = "/tmp/optio-codex-login.log";
+
+function buildCodexLoginScript() {
+  return [
+    "set -euo pipefail",
+    'export CODEX_HOME="/home/agent/.codex"',
+    'mkdir -p "$CODEX_HOME"',
+    'printf \'cli_auth_credentials_store = "file"\\n\' > "$CODEX_HOME/config.toml"',
+    'chmod 700 "$CODEX_HOME"',
+    'chmod 600 "$CODEX_HOME/config.toml"',
+    `rm -f ${JSON.stringify(CODEX_LOGIN_LOG_PATH)}`,
+    `codex login --device-auth 2>&1 | tee ${JSON.stringify(CODEX_LOGIN_LOG_PATH)}`,
+  ].join("\n");
 }
 
-async function collectExecOutput(session: ExecSession): Promise<{ stdout: string; stderr: string }> {
+async function startCodexLoginInSession(sessionId: string, userId?: string) {
+  const { handle } = await resolveSessionPodHandle(sessionId, userId);
+  const launchScript = [
+    "set -euo pipefail",
+    "cat > /tmp/optio-start-codex-login.sh <<'EOF'",
+    buildCodexLoginScript(),
+    "EOF",
+    "chmod 700 /tmp/optio-start-codex-login.sh",
+    "nohup bash /tmp/optio-start-codex-login.sh >/tmp/optio-start-codex-login.nohup 2>&1 </dev/null &",
+    "echo started",
+  ].join("\n");
+  const exec = await getRuntime().exec(handle, ["bash", "-lc", launchScript], { tty: false });
+  const result = await collectExecOutput(exec);
+  if (!result.stdout.includes("started")) {
+    throw new Error(result.stderr.trim() || "Failed to start managed Codex login");
+  }
+}
+
+export function extractCodexDeviceAuth(logOutput: string) {
+  const sanitized = logOutput.replace(/\u001b\[[0-9;]*m/g, "");
+  const urls = Array.from(sanitized.matchAll(/https?:\/\/[^\s)<>'\"]+/g), (match) => match[0]);
+  const loginUrl =
+    urls.find(
+      (url) =>
+        /auth|login|device|openai|chatgpt/i.test(url) &&
+        !/localhost|127\.0\.0\.1|\[::1\]/i.test(url),
+    ) ?? null;
+  const userCode = sanitized.match(/\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+\b/)?.at(-1) ?? null;
+  return { loginUrl, userCode };
+}
+
+export interface CodexAuthLoginStatus {
+  state:
+    | "not_started"
+    | "starting"
+    | "waiting_for_login"
+    | "ready_to_import"
+    | "connected"
+    | "error";
+  canImport: boolean;
+  authDetected: boolean;
+  sessionId: string | null;
+  repoUrl: string | null;
+  loginUrl: string | null;
+  userCode: string | null;
+  lastError: string | null;
+}
+
+function workspaceCondition(workspaceId?: string | null) {
+  return workspaceId
+    ? eq(codexAuthAccounts.workspaceId, workspaceId)
+    : isNull(codexAuthAccounts.workspaceId);
+}
+
+async function collectExecOutput(
+  session: ExecSession,
+): Promise<{ stdout: string; stderr: string }> {
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
 
@@ -99,16 +167,18 @@ export async function getCodexAppServerConfig(opts: {
   userId?: string | null;
 }) {
   const account = await getCodexAuthAccount(opts.workspaceId);
-  const codexAuthJson = (
-    await retrieveSecretWithFallback("CODEX_AUTH_JSON", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
-  const legacyUrl = (
-    await retrieveSecretWithFallback("CODEX_APP_SERVER_URL", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
+  const codexAuthJson = (await retrieveSecretWithFallback(
+    "CODEX_AUTH_JSON",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
+  const legacyUrl = (await retrieveSecretWithFallback(
+    "CODEX_APP_SERVER_URL",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
 
   return {
     appServerUrl: account?.appServerUrl ?? legacyUrl ?? undefined,
@@ -148,10 +218,12 @@ export async function startCodexAuthSession(input: {
       .set(values)
       .where(eq(codexAuthAccounts.id, existing.id))
       .returning();
+    await startCodexLoginInSession(session.id, input.userId);
     return { account: updated, session };
   }
 
   const [created] = await db.insert(codexAuthAccounts).values(values).returning();
+  await startCodexLoginInSession(session.id, input.userId);
   return { account: created, session };
 }
 
@@ -169,6 +241,101 @@ async function resolveSessionPodHandle(sessionId: string, userId?: string) {
     name: pod.podName,
   };
   return { session, handle };
+}
+
+export async function getCodexAuthLoginStatus(input: {
+  workspaceId?: string | null;
+  userId?: string;
+}): Promise<{
+  account: Awaited<ReturnType<typeof getCodexAuthAccount>> | null;
+  login: CodexAuthLoginStatus;
+}> {
+  const account = await getCodexAuthAccount(input.workspaceId);
+  const sessionId = account?.loginSessionId ?? null;
+  const repoUrl = account?.loginSessionRepoUrl ?? null;
+  const base = {
+    sessionId,
+    repoUrl,
+    loginUrl: null,
+    userCode: null,
+    lastError: account?.lastError ?? null,
+  };
+  if (!account)
+    return {
+      account: null,
+      login: { ...base, state: "not_started", canImport: false, authDetected: false },
+    };
+  if (account.status === "connected")
+    return {
+      account,
+      login: { ...base, state: "connected", canImport: false, authDetected: true },
+    };
+  if (!sessionId)
+    return {
+      account,
+      login: {
+        ...base,
+        state: account.lastError ? "error" : "not_started",
+        canImport: false,
+        authDetected: false,
+      },
+    };
+  try {
+    const { session, handle } = await resolveSessionPodHandle(sessionId, input.userId);
+    if (session.state !== "active") {
+      return {
+        account,
+        login: {
+          ...base,
+          state: "error",
+          canImport: false,
+          authDetected: false,
+          lastError: "The managed Codex login session has ended.",
+        },
+      };
+    }
+    const exec = await getRuntime().exec(
+      handle,
+      [
+        "bash",
+        "-lc",
+        `test -f ${CODEX_AUTH_PATH} && AUTH=1 || AUTH=0; tail -c 12000 ${CODEX_LOGIN_LOG_PATH} 2>/dev/null || true; printf '\\n__OPTIO_AUTH_EXISTS__%s\\n' "$AUTH"`,
+      ],
+      { tty: false },
+    );
+    const result = await collectExecOutput(exec);
+    const marker = "__OPTIO_AUTH_EXISTS__";
+    const [logOutput, authMarker = "0"] = result.stdout.split(marker);
+    const authDetected = authMarker.trim() === "1";
+    const { loginUrl, userCode } = extractCodexDeviceAuth(logOutput);
+    return {
+      account,
+      login: {
+        ...base,
+        state: authDetected
+          ? "ready_to_import"
+          : logOutput.trim()
+            ? "waiting_for_login"
+            : "starting",
+        canImport: authDetected,
+        authDetected,
+        loginUrl,
+        userCode,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      account,
+      login: {
+        ...base,
+        state: "starting",
+        canImport: false,
+        authDetected: false,
+        lastError: message,
+      },
+    };
+  }
 }
 
 export async function importCodexAuthFromSession(input: {
@@ -190,8 +357,8 @@ export async function importCodexAuthFromSession(input: {
       "-lc",
       [
         "set -euo pipefail",
-        'test -s /home/agent/.codex/auth.json || { echo "Codex login has not completed in this session yet." >&2; exit 44; }',
-        "cat /home/agent/.codex/auth.json",
+        `test -s ${CODEX_AUTH_PATH} || { echo "Codex login has not completed in this session yet." >&2; exit 44; }`,
+        `cat ${CODEX_AUTH_PATH}`,
       ].join("\n"),
     ],
     { tty: false },
