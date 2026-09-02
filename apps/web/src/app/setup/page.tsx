@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { SETUP_DISMISSED_STORAGE_KEY } from "@/components/layout/setup-check";
 import { CodexDeviceCode } from "@/components/codex-device-code";
 import { toast } from "sonner";
 import {
@@ -860,6 +861,17 @@ export default function SetupPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-2xl">
+        <div className="flex justify-end mb-3">
+          <button
+            onClick={() => {
+              window.localStorage.setItem(SETUP_DISMISSED_STORAGE_KEY, "true");
+              router.replace("/");
+            }}
+            className="text-sm text-text-muted hover:text-text transition-colors"
+          >
+            Exit setup
+          </button>
+        </div>
         {/* Progress */}
         <div className="flex items-center justify-center gap-1 mb-8">
           {STEPS.map((s, i) => (
