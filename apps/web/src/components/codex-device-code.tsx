@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 type CodexDeviceCodeProps = {
@@ -9,14 +9,31 @@ type CodexDeviceCodeProps = {
 
 export function CodexDeviceCode({ deviceCode }: CodexDeviceCodeProps) {
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<number | null>(null);
   const code = deviceCode?.trim();
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   if (!code) return null;
 
   const copyCode = async () => {
-    await navigator.clipboard.writeText(code);
+    if (!navigator.clipboard?.writeText) return;
+
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      return;
+    }
+
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (
