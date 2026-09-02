@@ -1144,7 +1144,7 @@ function AuthenticationSettings() {
   const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
   const [authDisabled, setAuthDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [codexDeviceCode] = useState<string | null>(null);
+  const codexDeviceCode: string | null = null;
 
   useEffect(() => {
     api
