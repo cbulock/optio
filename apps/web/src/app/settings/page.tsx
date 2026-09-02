@@ -1145,7 +1145,8 @@ function AuthenticationSettings() {
   const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
   const [authDisabled, setAuthDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
-  const codexDeviceCode: string | null = null;
+  const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
+  const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -1158,6 +1159,20 @@ function AuthenticationSettings() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const refresh = () =>
+      api
+        .getCodexAuthAccount()
+        .then((res) => {
+          setCodexDeviceCode(res.login.userCode);
+          setCodexDeviceLoginUrl(res.login.loginUrl);
+        })
+        .catch(() => {});
+    void refresh();
+    const interval = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   if (loading) {
     return (
       <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
@@ -1168,6 +1183,16 @@ function AuthenticationSettings() {
 
   return (
     <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+      {codexDeviceLoginUrl && (
+        <a
+          href={codexDeviceLoginUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block text-xs text-primary hover:underline"
+        >
+          Open Codex verification page
+        </a>
+      )}
       <CodexDeviceCode deviceCode={codexDeviceCode} />
       {authDisabled && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">

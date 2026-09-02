@@ -4,6 +4,7 @@ import { z } from "zod";
 import { checkRuntimeHealth } from "../services/container-service.js";
 import {
   getCodexAuthAccount,
+  getCodexAuthLoginStatus,
   upsertCodexAuthAccount,
   importCodexAuthFromSession,
   startCodexAuthSession,
@@ -61,10 +62,7 @@ const codexAuthSessionSchema = z
 const codexAuthAccountUpsertSchema = z
   .object({
     appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
-    authJson: z
-      .string()
-      .optional()
-      .describe("Optional Codex auth.json payload for manual import"),
+    authJson: z.string().optional().describe("Optional Codex auth.json payload for manual import"),
   })
   .describe("Body for saving the managed Codex auth account");
 
@@ -109,6 +107,16 @@ const CodexAuthAccountResponseSchema = z
         lastError: z.string().nullable(),
       })
       .nullable(),
+    login: z.object({
+      state: z.string(),
+      canImport: z.boolean(),
+      authDetected: z.boolean(),
+      sessionId: z.string().nullable(),
+      repoUrl: z.string().nullable(),
+      loginUrl: z.string().nullable(),
+      userCode: z.string().nullable(),
+      lastError: z.string().nullable(),
+    }),
   })
   .describe("Current managed Codex auth account state");
 const CodexAuthSessionResponseSchema = z
@@ -364,7 +372,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const account = await getCodexAuthAccount(req.user?.workspaceId ?? null);
+      const { account, login } = await getCodexAuthLoginStatus({
+        workspaceId: req.user?.workspaceId ?? null,
+        userId: req.user?.id,
+      });
       reply.send({
         account: account
           ? {
@@ -378,6 +389,7 @@ export async function setupRoutes(rawApp: FastifyInstance) {
               lastError: account.lastError ?? null,
             }
           : null,
+        login,
       });
     },
   );
