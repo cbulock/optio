@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { CodexDeviceCode } from "@/components/codex-device-code";
 import { toast } from "sonner";
 import {
   Zap,
@@ -111,6 +112,7 @@ export default function SetupPage() {
   const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
   const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const [codexDeviceCode] = useState<string | null>(null);
 
   // Step 3: Copilot token
   const [copilotToken, setCopilotToken] = useState("");
@@ -1301,6 +1303,7 @@ export default function SetupPage() {
                   </p>
                 </div>
                 <div className="space-y-2">
+                  <CodexDeviceCode deviceCode={codexDeviceCode} />
                   <label
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-md border transition-colors",
@@ -1688,8 +1691,8 @@ export default function SetupPage() {
                             <input
                               type="text"
                               value={codexAppServerUrl}
-                                onChange={(e) => setCodexAppServerUrl(e.target.value)}
-                                onInput={() => setCodexAuthImported(false)}
+                              onChange={(e) => setCodexAppServerUrl(e.target.value)}
+                              onInput={() => setCodexAuthImported(false)}
                               onPaste={(e) => {
                                 e.preventDefault();
                                 const pasted = e.clipboardData.getData("text").trim();
@@ -1743,7 +1746,13 @@ export default function SetupPage() {
                             {codexLoginSessionId && (
                               <button
                                 type="button"
-                                onClick={() => window.open(`/sessions/${codexLoginSessionId}?setup=codex-login`, "_blank", "noopener,noreferrer")}
+                                onClick={() =>
+                                  window.open(
+                                    `/sessions/${codexLoginSessionId}?setup=codex-login`,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  )
+                                }
                                 className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary"
                               >
                                 Reopen Login Session
@@ -1781,7 +1790,7 @@ export default function SetupPage() {
                                     setCodexAuthImported(false);
                                   }
                                 }}
-                                placeholder='Paste ~/.codex/auth.json from a machine already logged into Codex'
+                                placeholder="Paste ~/.codex/auth.json from a machine already logged into Codex"
                                 className="w-full min-h-32 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
                               />
                             </div>

@@ -345,6 +345,7 @@ export function startTaskWorker() {
           GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
           CODECOMMIT_REPO: isCodeCommit ? (parsedRepo?.repo ?? "") : "",
           BASE_BRANCH: task.repoBranch ?? repoConfig?.defaultBranch ?? "main",
+          TEST_COMMAND: repoConfig?.testCommand ?? "",
           PLANNING_MODE: isPlanningRun ? "true" : "",
         });
 

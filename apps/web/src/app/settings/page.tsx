@@ -35,6 +35,7 @@ import {
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
+import { CodexDeviceCode } from "@/components/codex-device-code";
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -1144,6 +1145,7 @@ function AuthenticationSettings() {
   const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
   const [authDisabled, setAuthDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const codexDeviceCode: string | null = null;
 
   useEffect(() => {
     api
@@ -1166,6 +1168,7 @@ function AuthenticationSettings() {
 
   return (
     <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+      <CodexDeviceCode deviceCode={codexDeviceCode} />
       {authDisabled && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
           <Shield className="w-4 h-4 shrink-0" />
@@ -1785,8 +1788,8 @@ function CodexSettings() {
   return (
     <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
       <p className="text-xs text-text-muted">
-        Configure Codex after initial setup. You can use either ChatGPT subscription app-server
-        mode or a standard OpenAI API key.
+        Configure Codex after initial setup. You can use either ChatGPT subscription app-server mode
+        or a standard OpenAI API key.
       </p>
 
       <label className="flex items-start gap-3 p-3 rounded-md border border-border cursor-pointer">
@@ -1886,7 +1889,7 @@ function CodexSettings() {
                     setCodexAuthJson(e.target.value);
                     setCodexAuthImported(false);
                   }}
-                  placeholder='Paste ~/.codex/auth.json from a machine already logged into Codex'
+                  placeholder="Paste ~/.codex/auth.json from a machine already logged into Codex"
                   className="mt-2 w-full min-h-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
                 />
               </details>
@@ -1906,9 +1909,7 @@ function CodexSettings() {
         <div className="flex-1 space-y-3">
           <div>
             <span className="text-sm font-medium">Use API key</span>
-            <p className="text-xs text-text-muted mt-0.5">
-              Pay-per-use via the OpenAI API.
-            </p>
+            <p className="text-xs text-text-muted mt-0.5">Pay-per-use via the OpenAI API.</p>
           </div>
           {codexAuthMode === "api-key" && (
             <>
