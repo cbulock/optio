@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { CodexDeviceCode } from "@/components/codex-device-code";
 import { toast } from "sonner";
 import {
   Zap,
@@ -104,6 +105,7 @@ export default function SetupPage() {
   // Step 3: Codex auth mode
   const [codexAuthMode, setCodexAuthMode] = useState<"api-key" | "app-server">("api-key");
   const [codexAppServerUrl, setCodexAppServerUrl] = useState("");
+  const [codexDeviceCode] = useState<string | null>(null);
 
   // Step 3: Copilot token
   const [copilotToken, setCopilotToken] = useState("");
@@ -1222,6 +1224,7 @@ export default function SetupPage() {
                   </p>
                 </div>
                 <div className="space-y-2">
+                  <CodexDeviceCode deviceCode={codexDeviceCode} />
                   <label
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-md border transition-colors",
