@@ -92,6 +92,40 @@ describe("renderTaskFile", () => {
 });
 
 describe("DEFAULT_PROMPT_TEMPLATE", () => {
+  it("uses the configured base branch and verification command", () => {
+    const result = renderPromptTemplate(DEFAULT_PROMPT_TEMPLATE, {
+      TASK_FILE: ".optio/task.md",
+      BRANCH_NAME: "optio/task-abc",
+      TASK_ID: "abc-123",
+      TASK_TITLE: "Fix login bug",
+      REPO_NAME: "org/repo",
+      BASE_BRANCH: "develop",
+      TEST_COMMAND: "pnpm test:unit",
+      AUTO_MERGE: "false",
+      ISSUE_NUMBER: "",
+    });
+
+    expect(result).toContain("starts clean from develop");
+    expect(result).toContain("identical to develop");
+    expect(result).toContain("pnpm test:unit");
+    expect(result).not.toContain("Run the relevant build, lint, and test commands");
+  });
+
+  it("uses scoped verification guidance when no command is configured", () => {
+    const result = renderPromptTemplate(DEFAULT_PROMPT_TEMPLATE, {
+      TASK_FILE: ".optio/task.md",
+      BRANCH_NAME: "optio/task-abc",
+      TASK_ID: "abc-123",
+      TASK_TITLE: "Fix login bug",
+      REPO_NAME: "org/repo",
+      AUTO_MERGE: "false",
+      ISSUE_NUMBER: "",
+    });
+
+    expect(result).toContain("Run the relevant build, lint, and test commands");
+    expect(result).not.toContain("{{TEST_COMMAND}}");
+  });
+
   it("uses issue reference when ISSUE_NUMBER is provided", () => {
     const result = renderPromptTemplate(DEFAULT_PROMPT_TEMPLATE, {
       TASK_FILE: ".optio/task.md",
