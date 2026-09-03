@@ -106,13 +106,13 @@ export default function SetupPage() {
   // Step 3: Codex auth mode
   const [codexAuthMode, setCodexAuthMode] = useState<"api-key" | "app-server">("api-key");
   const [codexAppServerUrl, setCodexAppServerUrl] = useState("");
-  const [codexAuthJson, setCodexAuthJson] = useState("");
   const [codexAuthImported, setCodexAuthImported] = useState(false);
   const [codexAuthAccountId, setCodexAuthAccountId] = useState("");
   const [codexLoginRepoUrl, setCodexLoginRepoUrl] = useState("");
   const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
-  const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const [codexLoginReadyToImport, setCodexLoginReadyToImport] = useState(false);
+  const [codexAutoImporting, setCodexAutoImporting] = useState(false);
   const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
   const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
 
@@ -234,6 +234,7 @@ export default function SetupPage() {
         .then((res) => {
           setCodexDeviceCode(res.login.userCode);
           setCodexDeviceLoginUrl(res.login.loginUrl);
+          setCodexLoginReadyToImport(res.login.canImport);
           if (res.account?.status === "connected") setCodexAuthImported(true);
         })
         .catch(() => {});
@@ -241,6 +242,36 @@ export default function SetupPage() {
     const interval = window.setInterval(refresh, 3000);
     return () => window.clearInterval(interval);
   }, [codexLoginSessionId, codexAuthImported]);
+
+  useEffect(() => {
+    if (
+      !codexLoginSessionId ||
+      !codexLoginReadyToImport ||
+      codexAuthImported ||
+      codexAutoImporting
+    )
+      return;
+
+    setCodexAutoImporting(true);
+    setCodexLoginReadyToImport(false);
+    api
+      .importCodexAuthFromSession(codexLoginSessionId)
+      .then(() => {
+        setCodexAuthImported(true);
+        setCodexDeviceCode(null);
+        setCodexDeviceLoginUrl(null);
+        toast.success("Codex login connected");
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Failed to save Codex login");
+      })
+      .finally(() => setCodexAutoImporting(false));
+  }, [
+    codexAuthImported,
+    codexAutoImporting,
+    codexLoginReadyToImport,
+    codexLoginSessionId,
+  ]);
 
   // Check if OAuth token is already stored when reaching the agents step
   useEffect(() => {
@@ -322,7 +353,7 @@ export default function SetupPage() {
   const codexReady =
     codexAuthMode === "app-server"
       ? codexAppServerUrl.trim().length > 0 &&
-        (codexAuthImported || codexAuthJson.trim().length > 0)
+        codexAuthImported
       : openaiValidated;
 
   const copilotReady = copilotValidated;
@@ -415,6 +446,10 @@ export default function SetupPage() {
       toast.error("Enter the Codex app-server URL first");
       return;
     }
+    setCodexDeviceCode(null);
+    setCodexDeviceLoginUrl(null);
+    setCodexLoginReadyToImport(false);
+    setCodexAuthImported(false);
     setCodexLoginLoading(true);
     try {
       const res = await api.startCodexAuthSession({ repoUrl, appServerUrl });
@@ -426,24 +461,6 @@ export default function SetupPage() {
       toast.error(err instanceof Error ? err.message : "Failed to start Codex login session");
     } finally {
       setCodexLoginLoading(false);
-    }
-  };
-
-  const importCodexLoginFromSession = async () => {
-    if (!codexLoginSessionId) {
-      toast.error("Start a Codex login session first");
-      return;
-    }
-    setCodexImportLoading(true);
-    try {
-      await api.importCodexAuthFromSession(codexLoginSessionId);
-      setCodexAuthImported(true);
-      setCodexAuthJson("");
-      toast.success("Imported shared Codex login");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to import Codex login");
-    } finally {
-      setCodexImportLoading(false);
     }
   };
 
@@ -667,7 +684,6 @@ export default function SetupPage() {
         await api.createSecret({ name: "CODEX_AUTH_MODE", value: "app-server" });
         const res = await api.saveCodexAuthAccount({
           appServerUrl: codexAppServerUrl.trim(),
-          authJson: codexAuthJson.trim() || undefined,
         });
         setCodexAuthAccountId(res.account.id);
         setCodexAuthImported(res.account.status === "connected");
@@ -1747,6 +1763,11 @@ export default function SetupPage() {
                             </a>
                           )}
                           <CodexDeviceCode deviceCode={codexDeviceCode} />
+                          {codexAutoImporting && (
+                            <p className="text-xs text-success flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Saving Codex login...
+                            </p>
+                          )}
                           <div>
                             <p className="text-xs text-text-muted mb-1.5">
                               Codex login session repo:
@@ -1772,14 +1793,6 @@ export default function SetupPage() {
                               className="px-3 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
                             >
                               {codexLoginLoading ? "Starting..." : "Start Codex Login"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={importCodexLoginFromSession}
-                              disabled={!codexLoginSessionId || codexImportLoading}
-                              className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary disabled:opacity-50"
-                            >
-                              {codexImportLoading ? "Importing..." : "Import Login"}
                             </button>
                             {codexLoginSessionId && (
                               <button
@@ -1809,30 +1822,6 @@ export default function SetupPage() {
                               <Check className="w-3 h-3" /> Shared Codex login imported
                             </span>
                           )}
-                          <details className="pt-1">
-                            <summary className="text-xs text-text-muted cursor-pointer">
-                              Advanced: paste auth.json manually
-                            </summary>
-                            <div className="mt-2">
-                              <textarea
-                                value={codexAuthJson}
-                                onChange={(e) => {
-                                  setCodexAuthJson(e.target.value);
-                                  setCodexAuthImported(false);
-                                }}
-                                onPaste={(e) => {
-                                  e.preventDefault();
-                                  const pasted = e.clipboardData.getData("text");
-                                  if (pasted) {
-                                    setCodexAuthJson(pasted.trim());
-                                    setCodexAuthImported(false);
-                                  }
-                                }}
-                                placeholder="Paste ~/.codex/auth.json from a machine already logged into Codex"
-                                className="w-full min-h-32 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
-                              />
-                            </div>
-                          </details>
                         </div>
                       )}
                     </div>
