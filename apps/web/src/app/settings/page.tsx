@@ -1680,6 +1680,7 @@ function CodexSettings() {
   const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
   const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const [codexLoginReadyToImport, setCodexLoginReadyToImport] = useState(false);
   const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
   const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
@@ -1697,6 +1698,7 @@ function CodexSettings() {
         setCodexLoginSessionId(res.account.loginSessionId ?? "");
         setCodexLoginRepoUrl(res.account.loginSessionRepoUrl ?? "");
         setCodexAuthImported(res.account.status === "connected");
+        setCodexLoginReadyToImport(res.login.canImport);
         setCodexDeviceCode(res.login.userCode);
         setCodexDeviceLoginUrl(res.login.loginUrl);
       })
@@ -1712,6 +1714,7 @@ function CodexSettings() {
         .then((res) => {
           setCodexDeviceCode(res.login.userCode);
           setCodexDeviceLoginUrl(res.login.loginUrl);
+          setCodexLoginReadyToImport(res.login.canImport);
           if (res.account?.status === "connected") setCodexAuthImported(true);
         })
         .catch(() => {});
@@ -1776,6 +1779,7 @@ function CodexSettings() {
     try {
       await api.importCodexAuthFromSession(codexLoginSessionId);
       setCodexAuthImported(true);
+      setCodexLoginReadyToImport(false);
       setCodexAuthJson("");
       toast.success("Imported shared Codex login");
     } catch (err) {
@@ -1877,6 +1881,11 @@ function CodexSettings() {
                 </a>
               )}
               <CodexDeviceCode deviceCode={codexDeviceCode} />
+              {codexLoginReadyToImport && !codexAuthImported && (
+                <p className="text-xs text-success flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Codex login completed. Finish login to save it.
+                </p>
+              )}
               <div>
                 <label className="block text-xs text-text-muted mb-1.5">
                   Codex login session repo
@@ -1904,7 +1913,11 @@ function CodexSettings() {
                   disabled={!codexLoginSessionId || codexImportLoading}
                   className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary disabled:opacity-50"
                 >
-                  {codexImportLoading ? "Importing..." : "Import Login"}
+                  {codexImportLoading
+                    ? "Importing..."
+                    : codexLoginReadyToImport
+                      ? "Finish Login"
+                      : "Import Login"}
                 </button>
                 {codexLoginSessionId && (
                   <button
