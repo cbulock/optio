@@ -1648,11 +1648,12 @@ function CodexSettings() {
   const [codexAppServerUrl, setCodexAppServerUrl] = useState("");
   const [codexAuthImported, setCodexAuthImported] = useState(false);
   const [codexAuthAccountId, setCodexAuthAccountId] = useState("");
-  const [codexLoginRepoUrl, setCodexLoginRepoUrl] = useState("");
-  const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
+  const [codexLoginPodName, setCodexLoginPodName] = useState("");
+  const [codexLoginExpiresAt, setCodexLoginExpiresAt] = useState<string | null>(null);
+  const [codexLoginState, setCodexLoginState] = useState("not_started");
+  const [codexLoginError, setCodexLoginError] = useState<string | null>(null);
+  const [codexNetworkPolicyNote, setCodexNetworkPolicyNote] = useState<string | null>(null);
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
-  const [codexLoginReadyToImport, setCodexLoginReadyToImport] = useState(false);
-  const [codexAutoImporting, setCodexAutoImporting] = useState(false);
   const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
   const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
@@ -1667,10 +1668,12 @@ function CodexSettings() {
         setCodexAuthMode("app-server");
         setCodexAuthAccountId(res.account.id);
         setCodexAppServerUrl(res.account.appServerUrl);
-        setCodexLoginSessionId(res.account.loginSessionId ?? "");
-        setCodexLoginRepoUrl(res.account.loginSessionRepoUrl ?? "");
+        setCodexLoginPodName(res.account.loginPodName ?? "");
+        setCodexLoginExpiresAt(res.account.loginExpiresAt);
         setCodexAuthImported(res.account.status === "connected");
-        setCodexLoginReadyToImport(res.login.canImport);
+        setCodexLoginState(res.login.state);
+        setCodexLoginError(res.login.lastError);
+        setCodexNetworkPolicyNote(res.login.networkPolicyNote);
         setCodexDeviceCode(res.login.userCode);
         setCodexDeviceLoginUrl(res.login.loginUrl);
       })
@@ -1679,51 +1682,26 @@ function CodexSettings() {
   }, []);
 
   useEffect(() => {
-    if (!codexLoginSessionId || codexAuthImported) return;
+    if (!codexAuthAccountId || codexAuthImported) return;
     const refresh = () =>
       api
         .getCodexAuthAccount()
         .then((res) => {
+          setCodexAuthAccountId(res.account?.id ?? "");
+          setCodexLoginPodName(res.account?.loginPodName ?? "");
+          setCodexLoginExpiresAt(res.account?.loginExpiresAt ?? null);
           setCodexDeviceCode(res.login.userCode);
           setCodexDeviceLoginUrl(res.login.loginUrl);
-          setCodexLoginReadyToImport(res.login.canImport);
+          setCodexLoginState(res.login.state);
+          setCodexLoginError(res.login.lastError);
+          setCodexNetworkPolicyNote(res.login.networkPolicyNote);
           if (res.account?.status === "connected") setCodexAuthImported(true);
         })
         .catch(() => {});
     void refresh();
     const interval = window.setInterval(refresh, 3000);
     return () => window.clearInterval(interval);
-  }, [codexLoginSessionId, codexAuthImported]);
-
-  useEffect(() => {
-    if (
-      !codexLoginSessionId ||
-      !codexLoginReadyToImport ||
-      codexAuthImported ||
-      codexAutoImporting
-    )
-      return;
-
-    setCodexAutoImporting(true);
-    setCodexLoginReadyToImport(false);
-    api
-      .importCodexAuthFromSession(codexLoginSessionId)
-      .then(() => {
-        setCodexAuthImported(true);
-        setCodexDeviceCode(null);
-        setCodexDeviceLoginUrl(null);
-        toast.success("Codex login connected");
-      })
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to save Codex login");
-      })
-      .finally(() => setCodexAutoImporting(false));
-  }, [
-    codexAuthImported,
-    codexAutoImporting,
-    codexLoginReadyToImport,
-    codexLoginSessionId,
-  ]);
+  }, [codexAuthAccountId, codexAuthImported]);
 
   const validateOpenai = async (keyOverride?: string) => {
     const key = (keyOverride ?? openaiKey).trim();
@@ -1748,29 +1726,43 @@ function CodexSettings() {
   };
 
   const startCodexLoginSession = async () => {
-    const repoUrl = codexLoginRepoUrl.trim();
     const appServerUrl = codexAppServerUrl.trim();
-    if (!repoUrl) {
-      toast.error("Enter a repo URL for the Codex login session");
-      return;
-    }
     if (!appServerUrl) {
       toast.error("Enter the Codex app-server URL first");
       return;
     }
     setCodexDeviceCode(null);
     setCodexDeviceLoginUrl(null);
-    setCodexLoginReadyToImport(false);
+    setCodexLoginError(null);
+    setCodexLoginState("starting");
     setCodexAuthImported(false);
     setCodexLoginLoading(true);
     try {
-      const res = await api.startCodexAuthSession({ repoUrl, appServerUrl });
+      const res = await api.startCodexAuthSession({ appServerUrl });
       setCodexAuthAccountId(res.account.id);
-      setCodexLoginSessionId(res.session.id);
-      setCodexLoginRepoUrl(repoUrl);
-      toast.success("Codex device login started");
+      setCodexLoginPodName(res.authPod.name);
+      toast.success("Codex device login started in a temporary auth pod");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to start Codex login session");
+      setCodexLoginState("error");
+      toast.error(err instanceof Error ? err.message : "Failed to start Codex login");
+    } finally {
+      setCodexLoginLoading(false);
+    }
+  };
+
+  const cancelCodexLoginSession = async () => {
+    setCodexLoginLoading(true);
+    try {
+      await api.cancelCodexAuthSession();
+      setCodexLoginPodName("");
+      setCodexLoginExpiresAt(null);
+      setCodexLoginState("not_started");
+      setCodexLoginError(null);
+      setCodexDeviceCode(null);
+      setCodexDeviceLoginUrl(null);
+      toast.success("Codex login canceled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel Codex login");
     } finally {
       setCodexLoginLoading(false);
     }
@@ -1867,23 +1859,21 @@ function CodexSettings() {
                 </a>
               )}
               <CodexDeviceCode deviceCode={codexDeviceCode} />
-              {codexAutoImporting && (
+              {codexLoginState === "connected" && (
                 <p className="text-xs text-success flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Saving Codex login...
+                  <Check className="w-3 h-3" /> Shared Codex login imported
                 </p>
               )}
-              <div>
-                <label className="block text-xs text-text-muted mb-1.5">
-                  Codex login session repo
-                </label>
-                <input
-                  type="text"
-                  value={codexLoginRepoUrl}
-                  onChange={(e) => setCodexLoginRepoUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo"
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
-                />
-              </div>
+              {(codexLoginState === "starting" || codexLoginState === "waiting_for_login") && (
+                <p className="text-xs text-text-muted flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Temporary auth pod is running and
+                  waiting for device login completion.
+                </p>
+              )}
+              {codexLoginError && <p className="text-xs text-danger">{codexLoginError}</p>}
+              {codexNetworkPolicyNote && (
+                <p className="text-xs text-text-muted">{codexNetworkPolicyNote}</p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1893,33 +1883,28 @@ function CodexSettings() {
                 >
                   {codexLoginLoading ? "Starting..." : "Start Codex Login"}
                 </button>
-                {codexLoginSessionId && (
+                {codexLoginPodName && (
                   <button
                     type="button"
-                    onClick={() =>
-                      window.open(
-                        `/sessions/${codexLoginSessionId}?setup=codex-login`,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
+                    onClick={cancelCodexLoginSession}
                     className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary"
                   >
-                    Reopen Login Session
+                    Cancel Login
                   </button>
                 )}
               </div>
-              {codexLoginSessionId && (
+              {codexLoginPodName && (
                 <p className="text-xs text-text-muted">
                   Managed account: <code>{codexAuthAccountId || "pending"}</code>
                   {" · "}
-                  Login session: <code>{codexLoginSessionId}</code>
+                  Auth pod: <code>{codexLoginPodName}</code>
+                  {codexLoginExpiresAt ? (
+                    <>
+                      {" · "}
+                      Expires: <code>{new Date(codexLoginExpiresAt).toLocaleString()}</code>
+                    </>
+                  ) : null}
                 </p>
-              )}
-              {codexAuthImported && (
-                <span className="text-xs text-success flex items-center gap-1">
-                  <Check className="w-3 h-3" /> Shared Codex login imported
-                </span>
               )}
             </>
           )}

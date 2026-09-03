@@ -824,6 +824,9 @@ export const api = {
         appServerUrl: string;
         loginSessionId: string | null;
         loginSessionRepoUrl: string | null;
+        loginPodId: string | null;
+        loginPodName: string | null;
+        loginExpiresAt: string | null;
         lastImportedAt: string | null;
         lastValidatedAt: string | null;
         lastError: string | null;
@@ -834,19 +837,33 @@ export const api = {
         authDetected: boolean;
         sessionId: string | null;
         repoUrl: string | null;
+        podName: string | null;
+        expiresAt: string | null;
         loginUrl: string | null;
         userCode: string | null;
         lastError: string | null;
+        networkPolicyNote: string | null;
       };
     }>("/api/setup/codex-auth"),
 
-  startCodexAuthSession: (data: { repoUrl: string; appServerUrl: string }) =>
+  startCodexAuthSession: (data: { appServerUrl: string }) =>
     request<{
-      account: { id: string; status: string; appServerUrl: string; loginSessionId: string | null };
-      session: { id: string };
+      account: {
+        id: string;
+        status: string;
+        appServerUrl: string;
+        loginSessionId: string | null;
+        loginPodName: string | null;
+      };
+      authPod: { name: string };
     }>("/api/setup/codex-auth/session", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  cancelCodexAuthSession: () =>
+    request<{ canceled: boolean }>("/api/setup/codex-auth/session", {
+      method: "DELETE",
     }),
 
   importCodexAuthFromSession: (sessionId: string) =>

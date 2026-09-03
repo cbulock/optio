@@ -8,6 +8,7 @@ import {
   upsertCodexAuthAccount,
   importCodexAuthFromSession,
   startCodexAuthSession,
+  cancelCodexAuthSession,
 } from "../services/codex-auth-service.js";
 import { listSecrets, retrieveSecret } from "../services/secret-service.js";
 import { isSubscriptionAvailable } from "../services/auth-service.js";
@@ -50,15 +51,18 @@ const validateRepoSchema = z
   .describe("Body for validating access to a specific repo URL");
 const codexAuthImportSchema = z
   .object({
-    sessionId: z.string().min(1).optional().describe("Interactive session ID used for codex login"),
+    sessionId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Legacy interactive session ID used for codex login"),
   })
   .describe("Body for importing Codex auth from an interactive session");
 const codexAuthSessionSchema = z
   .object({
-    repoUrl: z.string().min(1).describe("Repository URL for the login session"),
     appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
   })
-  .describe("Body for starting a managed Codex login session");
+  .describe("Body for starting a managed Codex login pod");
 const codexAuthAccountUpsertSchema = z
   .object({
     appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
@@ -102,6 +106,9 @@ const CodexAuthAccountResponseSchema = z
         appServerUrl: z.string(),
         loginSessionId: z.string().nullable(),
         loginSessionRepoUrl: z.string().nullable(),
+        loginPodId: z.string().nullable(),
+        loginPodName: z.string().nullable(),
+        loginExpiresAt: z.string().nullable(),
         lastImportedAt: z.string().nullable(),
         lastValidatedAt: z.string().nullable(),
         lastError: z.string().nullable(),
@@ -113,9 +120,12 @@ const CodexAuthAccountResponseSchema = z
       authDetected: z.boolean(),
       sessionId: z.string().nullable(),
       repoUrl: z.string().nullable(),
+      podName: z.string().nullable(),
+      expiresAt: z.string().nullable(),
       loginUrl: z.string().nullable(),
       userCode: z.string().nullable(),
       lastError: z.string().nullable(),
+      networkPolicyNote: z.string().nullable(),
     }),
   })
   .describe("Current managed Codex auth account state");
@@ -126,12 +136,18 @@ const CodexAuthSessionResponseSchema = z
       status: z.string(),
       appServerUrl: z.string(),
       loginSessionId: z.string().nullable(),
+      loginPodName: z.string().nullable(),
     }),
-    session: z.object({
-      id: z.string(),
+    authPod: z.object({
+      name: z.string(),
     }),
   })
-  .describe("Managed Codex login session details");
+  .describe("Managed Codex login pod details");
+const CodexAuthSessionCancelResponseSchema = z
+  .object({
+    canceled: z.boolean(),
+  })
+  .describe("Managed Codex login cancel result");
 const CodexAuthAccountUpsertResponseSchema = z
   .object({
     account: z.object({
@@ -140,6 +156,9 @@ const CodexAuthAccountUpsertResponseSchema = z
       appServerUrl: z.string(),
       loginSessionId: z.string().nullable(),
       loginSessionRepoUrl: z.string().nullable(),
+      loginPodId: z.string().nullable(),
+      loginPodName: z.string().nullable(),
+      loginExpiresAt: z.string().nullable(),
       lastImportedAt: z.string().nullable(),
       lastValidatedAt: z.string().nullable(),
       lastError: z.string().nullable(),
@@ -309,6 +328,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
             appServerUrl: account.appServerUrl,
             loginSessionId: account.loginSessionId,
             loginSessionRepoUrl: account.loginSessionRepoUrl,
+            loginPodId: account.loginPodId,
+            loginPodName: account.loginPodName,
+            loginExpiresAt: account.loginExpiresAt?.toISOString() ?? null,
             lastImportedAt: account.lastImportedAt?.toISOString() ?? null,
             lastValidatedAt: account.lastValidatedAt?.toISOString() ?? null,
             lastError: account.lastError ?? null,
@@ -327,10 +349,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       preHandler: [requireAdminWhenAuthenticated],
       schema: {
         operationId: "startCodexAuthSession",
-        summary: "Start a managed Codex login session",
+        summary: "Start a managed Codex login pod",
         description:
-          "Provision an Optio interactive session dedicated to `codex login`, " +
-          "and persist the pending Codex account record in the app.",
+          "Provision an ephemeral Optio auth pod dedicated to `codex login`, " +
+          "and persist only its temporary handle in the managed Codex account record.",
         tags: ["Setup & Settings"],
         body: codexAuthSessionSchema,
         response: { 200: CodexAuthSessionResponseSchema, 400: ErrorResponseSchema },
@@ -341,7 +363,6 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         const result = await startCodexAuthSession({
           workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
-          repoUrl: req.body.repoUrl,
           appServerUrl: req.body.appServerUrl,
         });
         reply.send({
@@ -350,12 +371,35 @@ export async function setupRoutes(rawApp: FastifyInstance) {
             status: result.account.status,
             appServerUrl: result.account.appServerUrl,
             loginSessionId: result.account.loginSessionId,
+            loginPodName: result.account.loginPodName,
           },
-          session: { id: result.session.id },
+          authPod: result.authPod,
         });
       } catch (err) {
         reply.status(400).send({ error: sanitizeError(err) });
       }
+    },
+  );
+
+  app.delete(
+    "/api/setup/codex-auth/session",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "cancelCodexAuthSession",
+        summary: "Cancel a managed Codex login pod",
+        description:
+          "Destroy the active managed Codex auth pod, if any, and clear its temporary handle.",
+        tags: ["Setup & Settings"],
+        response: { 200: CodexAuthSessionCancelResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const result = await cancelCodexAuthSession({
+        workspaceId: req.user?.workspaceId ?? null,
+      });
+      reply.send(result);
     },
   );
 
@@ -384,6 +428,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
               appServerUrl: account.appServerUrl,
               loginSessionId: account.loginSessionId,
               loginSessionRepoUrl: account.loginSessionRepoUrl,
+              loginPodId: account.loginPodId,
+              loginPodName: account.loginPodName,
+              loginExpiresAt: account.loginExpiresAt?.toISOString() ?? null,
               lastImportedAt: account.lastImportedAt?.toISOString() ?? null,
               lastValidatedAt: account.lastValidatedAt?.toISOString() ?? null,
               lastError: account.lastError ?? null,

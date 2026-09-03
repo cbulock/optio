@@ -11,6 +11,7 @@ const mockGetCodexAuthLoginStatus = vi.fn();
 const mockUpsertCodexAuthAccount = vi.fn();
 const mockImportCodexAuthFromSession = vi.fn();
 const mockStartCodexAuthSession = vi.fn();
+const mockCancelCodexAuthSession = vi.fn();
 
 vi.mock("../services/secret-service.js", () => ({
   listSecrets: (...args: unknown[]) => mockListSecrets(...args),
@@ -22,6 +23,7 @@ vi.mock("../services/codex-auth-service.js", () => ({
   upsertCodexAuthAccount: (...args: unknown[]) => mockUpsertCodexAuthAccount(...args),
   importCodexAuthFromSession: (...args: unknown[]) => mockImportCodexAuthFromSession(...args),
   startCodexAuthSession: (...args: unknown[]) => mockStartCodexAuthSession(...args),
+  cancelCodexAuthSession: (...args: unknown[]) => mockCancelCodexAuthSession(...args),
 }));
 
 const mockCheckRuntimeHealth = vi.fn();
@@ -313,9 +315,12 @@ describe("GET /api/setup/codex-auth", () => {
         authDetected: false,
         sessionId: null,
         repoUrl: null,
+        podName: null,
+        expiresAt: null,
         loginUrl: null,
         userCode: null,
         lastError: null,
+        networkPolicyNote: "gap",
       },
     });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
@@ -329,8 +334,11 @@ describe("GET /api/setup/codex-auth", () => {
       id: "acct-1",
       status: "connected",
       appServerUrl: "ws://localhost:3900/v1/connect",
-      loginSessionId: "sess-1",
-      loginSessionRepoUrl: "https://github.com/owner/repo",
+      loginSessionId: null,
+      loginSessionRepoUrl: null,
+      loginPodId: null,
+      loginPodName: null,
+      loginExpiresAt: null,
       lastImportedAt: new Date("2026-08-30T14:00:00.000Z"),
       lastValidatedAt: null,
       lastError: null,
@@ -341,11 +349,14 @@ describe("GET /api/setup/codex-auth", () => {
         state: "connected",
         canImport: false,
         authDetected: true,
-        sessionId: "sess-1",
-        repoUrl: "https://github.com/owner/repo",
+        sessionId: null,
+        repoUrl: null,
+        podName: null,
+        expiresAt: null,
         loginUrl: null,
         userCode: null,
         lastError: null,
+        networkPolicyNote: "gap",
       },
     });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
@@ -368,8 +379,11 @@ describe("POST /api/setup/codex-auth", () => {
       id: "acct-1",
       status: "connected",
       appServerUrl: "ws://localhost:3900/v1/connect",
-      loginSessionId: "sess-1",
-      loginSessionRepoUrl: "https://github.com/owner/repo",
+      loginSessionId: null,
+      loginSessionRepoUrl: null,
+      loginPodId: null,
+      loginPodName: null,
+      loginExpiresAt: null,
       lastImportedAt: new Date("2026-08-30T14:00:00.000Z"),
       lastValidatedAt: new Date("2026-08-30T14:00:00.000Z"),
       lastError: null,
@@ -403,22 +417,22 @@ describe("POST /api/setup/codex-auth/session", () => {
     app = await buildTestApp({ workspaceRole: "admin" });
   });
 
-  it("starts a managed Codex login session", async () => {
+  it("starts a managed Codex login pod", async () => {
     mockStartCodexAuthSession.mockResolvedValue({
       account: {
         id: "acct-1",
         status: "pending",
         appServerUrl: "ws://localhost:3900/v1/connect",
-        loginSessionId: "sess-1",
+        loginSessionId: null,
+        loginPodName: "optio-codex-auth-abcd1234",
       },
-      session: { id: "sess-1" },
+      authPod: { name: "optio-codex-auth-abcd1234" },
     });
 
     const res = await app.inject({
       method: "POST",
       url: "/api/setup/codex-auth/session",
       payload: {
-        repoUrl: "https://github.com/owner/repo",
         appServerUrl: "ws://localhost:3900/v1/connect",
       },
     });
@@ -427,10 +441,33 @@ describe("POST /api/setup/codex-auth/session", () => {
     expect(mockStartCodexAuthSession).toHaveBeenCalledWith({
       workspaceId: "ws-1",
       userId: "u1",
-      repoUrl: "https://github.com/owner/repo",
       appServerUrl: "ws://localhost:3900/v1/connect",
     });
-    expect(res.json().session.id).toBe("sess-1");
+    expect(res.json().authPod.name).toBe("optio-codex-auth-abcd1234");
+  });
+});
+
+describe("DELETE /api/setup/codex-auth/session", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp({ workspaceRole: "admin" });
+  });
+
+  it("cancels the managed Codex login pod", async () => {
+    mockCancelCodexAuthSession.mockResolvedValue({ canceled: true });
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/setup/codex-auth/session",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockCancelCodexAuthSession).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+    });
+    expect(res.json()).toEqual({ canceled: true });
   });
 });
 
