@@ -323,6 +323,7 @@ export type RepoAutoMerge = { kind: "autoMergePr" } & ActionBase;
 export type RepoResume = {
   kind: "resumeAgent";
   resumeReason: "ci_failure" | "conflicts" | "review";
+  statusPatch?: Partial<RepoRunStatus>;
 } & ActionBase;
 export type RepoRequeueForAgent = {
   kind: "requeueForAgent";

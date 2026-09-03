@@ -143,15 +143,19 @@ export function startPrWatcherWorker() {
               ? "conflicts"
               : checksStatus;
 
-          // Write all PR fields in one update. The reconciler reads these
-          // from the snapshot to decide the next action.
+          // Do not overwrite the edge-triggered check/review status fields
+          // here. The reconciler compares the last stored row values against
+          // the live PR snapshot to detect CI failures / review changes and
+          // decide whether to auto-resume. If the watcher stamps those fields
+          // first, the edge is lost and reconcile only sees steady state.
           const updates: Record<string, unknown> = {
             prNumber,
             prState: prData.merged ? "merged" : prData.state,
-            prChecksStatus: effectiveChecksStatus,
-            prReviewStatus: reviewStatus,
             updatedAt: new Date(),
           };
+          if (task.prChecksStatus === "conflicts" && effectiveChecksStatus !== "conflicts") {
+            updates.prChecksStatus = effectiveChecksStatus;
+          }
           if (reviewComments) {
             updates.prReviewComments = reviewComments;
           }

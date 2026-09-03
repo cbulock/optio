@@ -144,7 +144,7 @@ try {
       (init?.codexHome ? ` using ${init.codexHome}` : ""),
   });
 
-  const account = await client.request("account/read", { refreshToken: true });
+  const account = await client.request("account/read", { refreshToken: false });
   if (!account?.account) {
     const authDetails = daemonStderr.includes("refresh_token_reused")
       ? "refresh_token_reused"

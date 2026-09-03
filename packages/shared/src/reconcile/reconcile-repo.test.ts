@@ -565,7 +565,10 @@ describe("reconcileRepo — PR_OPENED", () => {
     });
     const action = reconcileRepo(s);
     expect(action.kind).toBe("resumeAgent");
-    if (action.kind === "resumeAgent") expect(action.resumeReason).toBe("conflicts");
+    if (action.kind === "resumeAgent") {
+      expect(action.resumeReason).toBe("conflicts");
+      expect(action.statusPatch?.prChecksStatus).toBe("conflicts");
+    }
   });
 
   it("merge conflicts, autoResume off → NEEDS_ATTENTION", () => {
@@ -596,7 +599,10 @@ describe("reconcileRepo — PR_OPENED", () => {
     });
     const action = reconcileRepo(s);
     expect(action.kind).toBe("resumeAgent");
-    if (action.kind === "resumeAgent") expect(action.resumeReason).toBe("ci_failure");
+    if (action.kind === "resumeAgent") {
+      expect(action.resumeReason).toBe("ci_failure");
+      expect(action.statusPatch?.prChecksStatus).toBe("failing");
+    }
   });
 
   it("CI just passed + on_ci_pass review → launchReview", () => {
@@ -722,7 +728,10 @@ describe("reconcileRepo — PR_OPENED", () => {
     });
     const action = reconcileRepo(s);
     expect(action.kind).toBe("resumeAgent");
-    if (action.kind === "resumeAgent") expect(action.resumeReason).toBe("review");
+    if (action.kind === "resumeAgent") {
+      expect(action.resumeReason).toBe("review");
+      expect(action.statusPatch?.prReviewStatus).toBe("changes_requested");
+    }
   });
 
   it("pr_status_refresh emits patchStatus when fields drift", () => {

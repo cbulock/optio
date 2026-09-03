@@ -587,6 +587,11 @@ export function startPrReviewWorker() {
         });
 
         const execSession = await repoPool.execTaskInRepoPod(pod, run.id, agentCommand, allEnv);
+        if (codexAuthLease) {
+          await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+          codexAuthLease = null;
+          log.info("Released exclusive Codex auth lease after launch");
+        }
 
         // For claude, seed the stream-json stdin with the initial prompt.
         if (agentType === "claude-code") {
@@ -699,6 +704,10 @@ export function startPrReviewWorker() {
         if (codexAppServerRun) {
           const handle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
           try {
+            codexAuthLease = await acquireCodexAuthLease({
+              workspaceId,
+              owner: `pr-review:${run.id}:sync`,
+            });
             const synced = await syncCodexAuthFromRepoPod({
               handle,
               taskId: run.id,
@@ -709,6 +718,11 @@ export function startPrReviewWorker() {
             }
           } catch (error) {
             log.warn({ err: error }, "Failed to sync Codex auth from repo pod");
+          } finally {
+            if (codexAuthLease) {
+              await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+              codexAuthLease = null;
+            }
           }
         }
 

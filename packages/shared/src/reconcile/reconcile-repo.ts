@@ -405,6 +405,7 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
       return {
         kind: "resumeAgent",
         resumeReason: "conflicts",
+        statusPatch: { prChecksStatus: "conflicts" },
         reason: "pr_conflicts_auto_resume",
       };
     }
@@ -423,6 +424,7 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
       return {
         kind: "resumeAgent",
         resumeReason: "ci_failure",
+        statusPatch: { prChecksStatus: "failing" },
         reason: "ci_failing_auto_resume",
       };
     }
@@ -477,6 +479,7 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
       return {
         kind: "resumeAgent",
         resumeReason: "review",
+        statusPatch: { prReviewStatus: "changes_requested" },
         reason: "review_changes_auto_resume",
       };
     }

@@ -410,6 +410,16 @@ async function applyResumeAgent(
     reviewComments: status.prReviewComments ?? "",
   });
 
+  const patch: Record<string, unknown> = {
+    reconcileBackoffUntil: null,
+    reconcileAttempts: 0,
+    ...(action.statusPatch ?? {}),
+  };
+  const casResult = await casUpdate("tasks", taskId, status.updatedAt, patch);
+  if (casResult === "stale") {
+    return { status: "stale", reason: "cas_failed_pre_resume" };
+  }
+
   // Two-step transition matches the existing pr-watcher behavior so the UI
   // briefly sees NEEDS_ATTENTION (signaling the auto-resume) before QUEUED.
   try {

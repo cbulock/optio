@@ -870,6 +870,11 @@ export function startTaskWorker() {
         const execSession = await repoPool.execTaskInRepoPod(pod, task.id, agentCommand, allEnv, {
           resetWorktree: shouldResetWorktree,
         });
+        if (codexAuthLease) {
+          await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+          codexAuthLease = null;
+          log.info("Released exclusive Codex auth lease after launch");
+        }
 
         // Register the live exec session so a user cancel can abort the
         // stream (and kill the in-pod agent) instead of letting the agent
@@ -1113,6 +1118,10 @@ export function startTaskWorker() {
         if (codexAppServerRun) {
           const handle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
           try {
+            codexAuthLease = await acquireCodexAuthLease({
+              workspaceId: taskWorkspaceId,
+              owner: `task:${task.id}:sync`,
+            });
             const synced = await syncCodexAuthFromRepoPod({
               handle,
               taskId: task.id,
@@ -1123,6 +1132,11 @@ export function startTaskWorker() {
             }
           } catch (error) {
             log.warn({ err: error }, "Failed to sync Codex auth from repo pod");
+          } finally {
+            if (codexAuthLease) {
+              await releaseCodexAuthLease(codexAuthLease).catch(() => {});
+              codexAuthLease = null;
+            }
           }
         }
         // Before processing results, verify this worker still owns the task.

@@ -124,106 +124,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function probeCodexAuthAtPath(input: {
-  handle: ContainerHandle;
-  authPath: string;
-}): Promise<{ valid: boolean; error: string | null }> {
-  const exec = await getRuntime().exec(
-    input.handle,
-    [
-      "bash",
-      "-lc",
-      [
-        "set -euo pipefail",
-        `export AUTH_PATH=${JSON.stringify(input.authPath)}`,
-        "PORT=$(python3 <<'PY'\nimport socket\nsock = socket.socket()\nsock.bind(('127.0.0.1', 0))\nprint(sock.getsockname()[1])\nsock.close()\nPY\n)",
-        "TMPDIR=$(mktemp -d)",
-        "export APP_STDERR=$(mktemp)",
-        "APP_PID=",
-        "cleanup() {",
-        '  if [ -n "$APP_PID" ]; then kill "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; fi',
-        '  rm -rf "$TMPDIR" "$APP_STDERR" /tmp/optio-codex-auth-probe.js /tmp/optio-codex-auth-probe.json',
-        "}",
-        "trap cleanup EXIT",
-        'test -s "$AUTH_PATH" || { echo \'{"valid":false,"error":"Codex auth.json is missing"}\'; exit 0; }',
-        'cp "$AUTH_PATH" "$TMPDIR/auth.json"',
-        'printf \'cli_auth_credentials_store = "file"\\n\' > "$TMPDIR/config.toml"',
-        'chmod 700 "$TMPDIR"',
-        'chmod 600 "$TMPDIR/auth.json" "$TMPDIR/config.toml"',
-        'CODEX_HOME="$TMPDIR" codex app-server --listen "ws://127.0.0.1:$PORT" >/dev/null 2>"$APP_STDERR" &',
-        "APP_PID=$!",
-        'for i in $(seq 1 30); do curl -sf "http://127.0.0.1:$PORT/readyz" >/dev/null && break; sleep 1; done',
-        "cat > /tmp/optio-codex-auth-probe.js <<'JS'",
-        "const port = process.env.PORT;",
-        "const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/connect`);",
-        "let done = false;",
-        "const finish = (payload) => {",
-        "  if (done) return;",
-        "  done = true;",
-        "  process.stdout.write(JSON.stringify(payload));",
-        "  process.exit(0);",
-        "};",
-        "ws.addEventListener('open', () => {",
-        "  ws.send(JSON.stringify({ jsonrpc: '2.0', id: '1', method: 'initialize', params: { clientInfo: { name: 'optio-auth-probe', version: '1' }, capabilities: {} } }) + '\\n');",
-        "});",
-        "ws.addEventListener('message', (event) => {",
-        "  for (const line of String(event.data).split('\\n')) {",
-        "    if (!line.trim()) continue;",
-        "    const message = JSON.parse(line);",
-        "    if (message.id === '1') {",
-        "      ws.send(JSON.stringify({ jsonrpc: '2.0', id: '2', method: 'account/read', params: { refreshToken: true } }) + '\\n');",
-        "      continue;",
-        "    }",
-        "    if (message.id === '2') {",
-        "      finish({ account: message.result?.account ?? null, rpcError: message.error ?? null });",
-        "      return;",
-        "    }",
-        "  }",
-        "});",
-        "ws.addEventListener('error', (event) => finish({ account: null, rpcError: event.error?.message ?? 'websocket_error' }));",
-        "setTimeout(() => finish({ account: null, rpcError: 'timeout' }), 5000);",
-        "JS",
-        'PORT="$PORT" node /tmp/optio-codex-auth-probe.js > /tmp/optio-codex-auth-probe.json',
-        "python3 <<'PY'",
-        "import json, os",
-        "payload = json.load(open('/tmp/optio-codex-auth-probe.json', 'r', encoding='utf-8'))",
-        "stderr_text = ''",
-        "stderr_path = os.environ.get('APP_STDERR')",
-        "if stderr_path and os.path.exists(stderr_path):",
-        "    stderr_text = open(stderr_path, 'r', encoding='utf-8', errors='replace').read()[-4000:]",
-        "error = None",
-        "if payload.get('account'):",
-        "    print(json.dumps({'valid': True, 'error': None}))",
-        "else:",
-        "    rpc_error = payload.get('rpcError')",
-        "    if isinstance(rpc_error, dict):",
-        "        error = rpc_error.get('message') or json.dumps(rpc_error)",
-        "    elif rpc_error:",
-        "        error = str(rpc_error)",
-        "    if not error and 'refresh_token_reused' in stderr_text:",
-        "        error = 'refresh_token_reused'",
-        "    if not error and '401 Unauthorized' in stderr_text:",
-        "        error = '401 Unauthorized during Codex auth refresh'",
-        "    if not error and stderr_text.strip():",
-        "        error = stderr_text.strip().splitlines()[-1]",
-        "    if not error:",
-        "        error = 'Codex app-server could not load the provided auth.json'",
-        "    print(json.dumps({'valid': False, 'error': error}))",
-        "PY",
-      ].join("\n"),
-    ],
-    { tty: false },
-  );
-
-  const result = await collectExecOutput(exec);
-  if (!result.stdout.trim()) {
-    throw new Error(result.stderr.trim() || "Failed to validate Codex auth in pod");
+function parseCodexAuthJson(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Codex auth.json is not valid JSON");
   }
-  const payload = JSON.parse(result.stdout) as { valid?: boolean; error?: string | null };
-  return {
-    valid: payload.valid === true,
-    error: payload.error ?? null,
-  };
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Codex auth.json must be a JSON object");
+  }
+
+  return JSON.stringify(parsed);
 }
 
 export function getCodexTaskHome(taskId: string) {
@@ -706,47 +619,21 @@ export async function getCodexAuthLoginStatus(input: {
     const authDetected = Boolean(parsed.authExists && parsed.authNonEmpty);
 
     if (authDetected) {
-      try {
-        await importCodexAuthFromSession({
-          workspaceId: input.workspaceId,
-          userId: input.userId,
+      return {
+        account,
+        login: {
+          state: "ready_to_import",
+          canImport: true,
+          authDetected: true,
+          instructions: buildInstructions("ready_to_import", loginDetails.loginUrl),
           sessionId,
-        });
-
-        const connectedAccount = await getCodexAuthAccount(input.workspaceId);
-        return {
-          account: connectedAccount,
-          login: {
-            state: "connected",
-            canImport: false,
-            authDetected: true,
-            instructions: buildInstructions("connected", null),
-            sessionId,
-            repoUrl,
-            loginUrl: loginDetails.loginUrl,
-            userCode: loginDetails.userCode,
-            lastError: null,
-            logExcerpt: loginDetails.logExcerpt,
-          },
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          account,
-          login: {
-            state: "ready_to_import",
-            canImport: true,
-            authDetected: true,
-            instructions: buildInstructions("ready_to_import", loginDetails.loginUrl),
-            sessionId,
-            repoUrl,
-            loginUrl: loginDetails.loginUrl,
-            userCode: loginDetails.userCode,
-            lastError: message,
-            logExcerpt: loginDetails.logExcerpt,
-          },
-        };
-      }
+          repoUrl,
+          loginUrl: loginDetails.loginUrl,
+          userCode: loginDetails.userCode,
+          lastError: account.lastError ?? null,
+          logExcerpt: loginDetails.logExcerpt,
+        },
+      };
     }
 
     const state: CodexAuthLoginStatus["state"] = authDetected
@@ -806,16 +693,6 @@ export async function importCodexAuthFromSession(input: {
   }
 
   const { handle } = await resolveSessionPodHandle(sessionId, input.userId);
-  const probe = await probeCodexAuthAtPath({ handle, authPath: CODEX_AUTH_PATH });
-  if (!probe.valid) {
-    await noteCodexAuthFailure({
-      workspaceId: input.workspaceId,
-      message: probe.error ?? "Codex session auth validation failed",
-    }).catch(() => {});
-    throw new Error(
-      `Managed Codex login is not usable yet: ${probe.error ?? "auth validation failed"}`,
-    );
-  }
   const exec = await getRuntime().exec(
     handle,
     [
@@ -835,18 +712,18 @@ export async function importCodexAuthFromSession(input: {
     throw new Error(result.stderr.trim() || "Failed to read Codex auth from session");
   }
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout);
-  } catch {
-    throw new Error("Session produced an invalid Codex auth.json");
+    const authJson = parseCodexAuthJson(result.stdout);
+    await storeSecret("CODEX_AUTH_JSON", authJson, "global");
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Session produced an invalid Codex auth.json";
+    await noteCodexAuthFailure({
+      workspaceId: input.workspaceId,
+      message,
+    }).catch(() => {});
+    throw new Error(message);
   }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Session produced an invalid Codex auth.json");
-  }
-
-  await storeSecret("CODEX_AUTH_JSON", JSON.stringify(parsed), "global");
 
   if (account) {
     await db
@@ -898,18 +775,12 @@ export async function syncCodexAuthFromRepoPod(input: {
   const payload = JSON.parse(result.stdout) as { exists?: boolean; auth?: string };
   if (!payload.exists || !payload.auth?.trim()) return false;
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(payload.auth);
+    const authJson = parseCodexAuthJson(payload.auth);
+    await storeSecret("CODEX_AUTH_JSON", authJson, "global");
   } catch {
     throw new Error("Repo pod produced an invalid Codex auth.json");
   }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Repo pod produced an invalid Codex auth.json");
-  }
-
-  await storeSecret("CODEX_AUTH_JSON", JSON.stringify(parsed), "global");
   await db
     .update(codexAuthAccounts)
     .set({
