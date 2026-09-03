@@ -1739,8 +1739,7 @@ function CodexSettings() {
       setCodexAuthAccountId(res.account.id);
       setCodexLoginSessionId(res.session.id);
       setCodexLoginRepoUrl(repoUrl);
-      window.open(`/sessions/${res.session.id}?setup=codex-login`, "_blank", "noopener,noreferrer");
-      toast.success("Opened Codex login session");
+      toast.success("Codex device login started");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start Codex login session");
     } finally {
