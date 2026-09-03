@@ -418,14 +418,10 @@ export default function SetupPage() {
     setCodexLoginLoading(true);
     try {
       const res = await api.startCodexAuthSession({ repoUrl, appServerUrl });
-      const sessionId = res.session.id;
       setCodexAuthAccountId(res.account.id);
-      setCodexLoginSessionId(sessionId);
+      setCodexLoginSessionId(res.session.id);
       setCodexLoginRepoUrl(repoUrl);
-      if (typeof window !== "undefined") {
-        window.open(`/sessions/${sessionId}?setup=codex-login`, "_blank", "noopener,noreferrer");
-      }
-      toast.success("Opened Codex login session");
+      toast.success("Codex device login started");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start Codex login session");
     } finally {
