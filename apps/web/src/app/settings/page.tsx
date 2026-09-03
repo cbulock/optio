@@ -1680,6 +1680,8 @@ function CodexSettings() {
   const [codexLoginSessionId, setCodexLoginSessionId] = useState("");
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
   const [codexImportLoading, setCodexImportLoading] = useState(false);
+  const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
+  const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
   const [openaiValidated, setOpenaiValidated] = useState(false);
   const [openaiError, setOpenaiError] = useState("");
@@ -1695,10 +1697,28 @@ function CodexSettings() {
         setCodexLoginSessionId(res.account.loginSessionId ?? "");
         setCodexLoginRepoUrl(res.account.loginSessionRepoUrl ?? "");
         setCodexAuthImported(res.account.status === "connected");
+        setCodexDeviceCode(res.login.userCode);
+        setCodexDeviceLoginUrl(res.login.loginUrl);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!codexLoginSessionId || codexAuthImported) return;
+    const refresh = () =>
+      api
+        .getCodexAuthAccount()
+        .then((res) => {
+          setCodexDeviceCode(res.login.userCode);
+          setCodexDeviceLoginUrl(res.login.loginUrl);
+          if (res.account?.status === "connected") setCodexAuthImported(true);
+        })
+        .catch(() => {});
+    void refresh();
+    const interval = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(interval);
+  }, [codexLoginSessionId, codexAuthImported]);
 
   const validateOpenai = async (keyOverride?: string) => {
     const key = (keyOverride ?? openaiKey).trim();
@@ -1846,6 +1866,17 @@ function CodexSettings() {
                   className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
                 />
               </div>
+              {codexDeviceLoginUrl && (
+                <a
+                  href={codexDeviceLoginUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-xs text-primary hover:underline"
+                >
+                  Open Codex verification page
+                </a>
+              )}
+              <CodexDeviceCode deviceCode={codexDeviceCode} />
               <div>
                 <label className="block text-xs text-text-muted mb-1.5">
                   Codex login session repo
