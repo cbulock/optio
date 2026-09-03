@@ -7,6 +7,27 @@ cd "$ROOT_DIR"
 
 QUICK=false
 SKIP_PULL=false
+LOCAL_IMAGE_TAG=""
+
+load_kind_images() {
+  if ! command -v kind >/dev/null 2>&1; then
+    return
+  fi
+
+  local current_context
+  current_context="$(kubectl config current-context 2>/dev/null || true)"
+  if [[ "$current_context" != kind-* ]]; then
+    return
+  fi
+
+  local cluster_name="${current_context#kind-}"
+  if ! kind get clusters 2>/dev/null | grep -qx "$cluster_name"; then
+    return
+  fi
+
+  echo "   Loading images into kind cluster '$cluster_name'..."
+  kind load docker-image "$@" --name "$cluster_name"
+}
 
 usage() {
   echo "Usage: update-local.sh [OPTIONS]"
@@ -36,6 +57,7 @@ if [ "$SKIP_PULL" = false ]; then
 else
   echo "[1/4] Skipping git pull"
 fi
+LOCAL_IMAGE_TAG="local-$(git rev-parse --short=12 HEAD)"
 
 # Install any new dependencies
 echo "[2/4] Installing dependencies..."
@@ -43,6 +65,7 @@ pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
 # Build images
 echo "[3/4] Building images..."
+echo "   Deployment image tag: $LOCAL_IMAGE_TAG"
 
 # API and Web always build in parallel
 docker build -t optio-api:latest -f Dockerfile.api . -q &
@@ -82,38 +105,47 @@ fi
 # Wait for API and Web builds
 wait $API_PID || { echo "API image build failed"; exit 1; }
 wait $WEB_PID || { echo "Web image build failed"; exit 1; }
+docker tag optio-api:latest "optio-api:$LOCAL_IMAGE_TAG"
+docker tag optio-web:latest "optio-web:$LOCAL_IMAGE_TAG"
+load_kind_images "optio-api:$LOCAL_IMAGE_TAG" "optio-web:$LOCAL_IMAGE_TAG"
 echo "   Images built."
 
-# Rolling restart
-echo "[4/4] Restarting deployments..."
-# NOTE: --reset-then-reuse-values carries forward the release's existing values,
-# including encryption.key. Never pass a freshly generated encryption key here —
-# rotating it invalidates all stored secrets (see issue #553 and setup-local.sh).
-helm upgrade optio helm/optio -n optio -f helm/optio/values.local.yaml --reset-then-reuse-values
+# Deploy immutable tags. Reusing Helm values without explicit tags can retain
+# old images, producing a successful rollout that serves stale code.
+echo "[4/4] Deploying freshly built images..."
+helm upgrade optio helm/optio -n optio -f helm/optio/values.local.yaml --reuse-values \
+  --set "api.image.tag=$LOCAL_IMAGE_TAG" \
+  --set "web.image.tag=$LOCAL_IMAGE_TAG"
 
 DEPLOYMENTS="deployment/optio-api deployment/optio-web"
 if kubectl get deployment optio-optio -n optio &>/dev/null; then
   DEPLOYMENTS="$DEPLOYMENTS deployment/optio-optio"
 fi
-kubectl rollout restart $DEPLOYMENTS -n optio
-
 for dep in $DEPLOYMENTS; do
-  kubectl rollout status "$dep" -n optio --timeout=90s 2>/dev/null || true
+  kubectl rollout status "$dep" -n optio --timeout=120s
 done
 
-# Verify health
-if curl -sf http://localhost:30400/api/health >/dev/null 2>&1; then
-  HEALTH="healthy"
-else
-  HEALTH="not responding (may still be starting)"
+# Verify both the running image references and the local endpoints. A Helm
+# success alone is not evidence that the rebuilt UI/API is what pods serve.
+API_IMAGE="$(kubectl get deployment optio-api -n optio -o jsonpath='{.spec.template.spec.containers[0].image}')"
+WEB_IMAGE="$(kubectl get deployment optio-web -n optio -o jsonpath='{.spec.template.spec.containers[0].image}')"
+if [ "$API_IMAGE" != "optio-api:$LOCAL_IMAGE_TAG" ] || [ "$WEB_IMAGE" != "optio-web:$LOCAL_IMAGE_TAG" ]; then
+  echo "Deployment image verification failed:" >&2
+  echo "  API: $API_IMAGE (expected optio-api:$LOCAL_IMAGE_TAG)" >&2
+  echo "  Web: $WEB_IMAGE (expected optio-web:$LOCAL_IMAGE_TAG)" >&2
+  exit 1
 fi
+curl -fsS http://localhost:30400/api/health >/dev/null
+curl -fsSI http://localhost:30310 >/dev/null
 
 echo ""
 echo "=== Update Complete ==="
 echo ""
 echo "  Web UI ...... http://localhost:30310"
 echo "  API ......... http://localhost:30400"
-echo "  API health .. $HEALTH"
+echo "  API health .. healthy"
+echo "  API image ... $API_IMAGE"
+echo "  Web image ... $WEB_IMAGE"
 if [ "$QUICK" = true ]; then
   echo ""
   echo "  (--quick mode: agent images were not rebuilt)"
