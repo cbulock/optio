@@ -17,6 +17,8 @@ const CODEX_LOGIN_LOG_PATH = "/tmp/optio-codex-login.log";
 const CODEX_LOGIN_EXIT_CODE_PATH = "/tmp/optio-codex-login.exit";
 const CODEX_LOGIN_DONE_PATH = "/tmp/optio-codex-login.done";
 const CODEX_AUTH_POD_TIMEOUT_MS = parseIntEnv("OPTIO_CODEX_AUTH_POD_TIMEOUT_MS", 15 * 60 * 1000);
+const CODEX_DEVICE_CODE_WAIT_MS = 8_000;
+const CODEX_DEVICE_CODE_POLL_MS = 250;
 const CODEX_AUTH_NETWORK_POLICY_NOTE =
   "Optio does not currently enforce auth-pod egress to only OpenAI authentication hosts. " +
   "Standard Kubernetes NetworkPolicy in this repo is port-based and cannot safely express the required hostname allowlist on its own.";
@@ -274,6 +276,18 @@ async function probeAuthPod(handle: ContainerHandle) {
   return parsePodProbe((await collectExecOutput(exec)).stdout);
 }
 
+async function waitForCodexDeviceAuth(handle: ContainerHandle) {
+  const deadline = Date.now() + CODEX_DEVICE_CODE_WAIT_MS;
+  let details = { loginUrl: null, userCode: null };
+  while (Date.now() < deadline) {
+    const probe = await probeAuthPod(handle);
+    details = extractCodexDeviceAuth(probe.logOutput);
+    if (details.userCode || probe.authDetected || probe.done) return details;
+    await new Promise((resolve) => setTimeout(resolve, CODEX_DEVICE_CODE_POLL_MS));
+  }
+  return details;
+}
+
 async function readAndValidateAuthJson(handle: ContainerHandle, sourceLabel: string) {
   const exec = await getRuntime().exec(
     handle,
@@ -489,7 +503,8 @@ export async function startCodexAuthSession(input: {
       [account] = await db.insert(codexAuthAccounts).values(values).returning();
     }
     await startCodexLoginInPod(handle);
-    return { account, authPod: { name: handle.name } };
+    const deviceAuth = await waitForCodexDeviceAuth(handle);
+    return { account, authPod: { name: handle.name }, deviceAuth };
   } catch (error) {
     await destroyHandle(handle);
     if (account?.id) {

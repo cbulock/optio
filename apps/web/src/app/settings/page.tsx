@@ -1741,7 +1741,10 @@ function CodexSettings() {
       const res = await api.startCodexAuthSession({ appServerUrl });
       setCodexAuthAccountId(res.account.id);
       setCodexLoginPodName(res.authPod.name);
-      toast.success("Codex device login started in a temporary auth pod");
+      setCodexLoginState(res.login.state);
+      setCodexDeviceCode(res.login.userCode);
+      setCodexDeviceLoginUrl(res.login.loginUrl);
+      toast.success(res.login.userCode ? "Codex sign-in code is ready" : "Preparing Codex sign-in");
     } catch (err) {
       setCodexLoginState("error");
       toast.error(err instanceof Error ? err.message : "Failed to start Codex login");
@@ -1866,8 +1869,8 @@ function CodexSettings() {
               )}
               {(codexLoginState === "starting" || codexLoginState === "waiting_for_login") && (
                 <p className="text-xs text-text-muted flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Temporary auth pod is running and
-                  waiting for device login completion.
+                  <Loader2 className="w-3 h-3 animate-spin" /> Preparing your Codex sign-in. The
+                  code will appear here automatically.
                 </p>
               )}
               {codexLoginError && <p className="text-xs text-danger">{codexLoginError}</p>}
@@ -1895,9 +1898,7 @@ function CodexSettings() {
               </div>
               {codexLoginPodName && (
                 <p className="text-xs text-text-muted">
-                  Managed account: <code>{codexAuthAccountId || "pending"}</code>
-                  {" · "}
-                  Auth pod: <code>{codexLoginPodName}</code>
+                  Codex sign-in is active
                   {codexLoginExpiresAt ? (
                     <>
                       {" · "}

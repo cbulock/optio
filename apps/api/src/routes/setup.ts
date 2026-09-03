@@ -141,6 +141,11 @@ const CodexAuthSessionResponseSchema = z
     authPod: z.object({
       name: z.string(),
     }),
+    login: z.object({
+      state: z.string(),
+      loginUrl: z.string().nullable(),
+      userCode: z.string().nullable(),
+    }),
   })
   .describe("Managed Codex login pod details");
 const CodexAuthSessionCancelResponseSchema = z
@@ -374,6 +379,11 @@ export async function setupRoutes(rawApp: FastifyInstance) {
             loginPodName: result.account.loginPodName,
           },
           authPod: result.authPod,
+          login: {
+            state: result.deviceAuth.userCode ? "waiting_for_login" : "starting",
+            loginUrl: result.deviceAuth.loginUrl,
+            userCode: result.deviceAuth.userCode,
+          },
         });
       } catch (err) {
         reply.status(400).send({ error: sanitizeError(err) });

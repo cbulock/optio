@@ -856,6 +856,11 @@ export const api = {
         loginPodName: string | null;
       };
       authPod: { name: string };
+      login: {
+        state: string;
+        loginUrl: string | null;
+        userCode: string | null;
+      };
     }>("/api/setup/codex-auth/session", {
       method: "POST",
       body: JSON.stringify(data),
