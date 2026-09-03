@@ -5,6 +5,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+LOCAL_IMAGE_TAG="local-$(git rev-parse --short=12 HEAD)"
+
+load_kind_images() {
+  if ! command -v kind >/dev/null 2>&1; then
+    return
+  fi
+
+  local current_context
+  current_context="$(kubectl config current-context 2>/dev/null || true)"
+  if [[ "$current_context" != kind-* ]]; then
+    return
+  fi
+
+  local cluster_name="${current_context#kind-}"
+  if ! kind get clusters 2>/dev/null | grep -qx "$cluster_name"; then
+    return
+  fi
+
+  echo "   Loading images into kind cluster '$cluster_name'..."
+  kind load docker-image "$@" --name "$cluster_name"
+}
+
 echo "=== Optio Local Setup ==="
 echo ""
 
@@ -60,6 +82,9 @@ echo "   All agent images built."
 echo "[3/6] Building API and Web images..."
 docker build -t optio-api:latest -f Dockerfile.api . -q
 docker build -t optio-web:latest -f Dockerfile.web . -q
+docker tag optio-api:latest "optio-api:$LOCAL_IMAGE_TAG"
+docker tag optio-web:latest "optio-web:$LOCAL_IMAGE_TAG"
+load_kind_images "optio-api:$LOCAL_IMAGE_TAG" "optio-web:$LOCAL_IMAGE_TAG"
 echo "   API and Web images built."
 
 echo "[4/6] Installing metrics-server..."
@@ -93,11 +118,15 @@ if helm status optio -n optio &>/dev/null; then
   helm upgrade optio helm/optio -n optio \
     -f helm/optio/values.local.yaml \
     --set encryption.key="$ENCRYPTION_KEY" \
+    --set "api.image.tag=$LOCAL_IMAGE_TAG" \
+    --set "web.image.tag=$LOCAL_IMAGE_TAG" \
     --wait --timeout=120s
 else
   helm install optio helm/optio -n optio --create-namespace \
     -f helm/optio/values.local.yaml \
     --set encryption.key="$ENCRYPTION_KEY" \
+    --set "api.image.tag=$LOCAL_IMAGE_TAG" \
+    --set "web.image.tag=$LOCAL_IMAGE_TAG" \
     --wait --timeout=120s
 fi
 echo "   Helm deployment complete."
@@ -106,6 +135,16 @@ echo "[6/6] Verifying deployment..."
 kubectl wait --namespace optio --for=condition=available deployment/optio-api --timeout=60s 2>/dev/null || true
 kubectl wait --namespace optio --for=condition=available deployment/optio-web --timeout=60s 2>/dev/null || true
 kubectl wait --namespace optio --for=condition=available deployment/optio-optio --timeout=60s 2>/dev/null || true
+API_IMAGE="$(kubectl get deployment optio-api -n optio -o jsonpath='{.spec.template.spec.containers[0].image}')"
+WEB_IMAGE="$(kubectl get deployment optio-web -n optio -o jsonpath='{.spec.template.spec.containers[0].image}')"
+if [ "$API_IMAGE" != "optio-api:$LOCAL_IMAGE_TAG" ] || [ "$WEB_IMAGE" != "optio-web:$LOCAL_IMAGE_TAG" ]; then
+  echo "Deployment image verification failed:" >&2
+  echo "  API: $API_IMAGE (expected optio-api:$LOCAL_IMAGE_TAG)" >&2
+  echo "  Web: $WEB_IMAGE (expected optio-web:$LOCAL_IMAGE_TAG)" >&2
+  exit 1
+fi
+curl -fsS http://localhost:30400/api/health >/dev/null
+curl -fsSI http://localhost:30310 >/dev/null
 
 echo ""
 echo "=== Setup Complete ==="
