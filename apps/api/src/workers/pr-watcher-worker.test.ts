@@ -33,6 +33,15 @@ describe("determineCheckStatus", () => {
     ).toBe("passing");
   });
 
+  it("treats neutral informational checks as passing", () => {
+    expect(
+      determineCheckStatus([
+        { status: "completed", conclusion: "success" },
+        { status: "completed", conclusion: "neutral" },
+      ]),
+    ).toBe("passing");
+  });
+
   it("returns failing when any check fails", () => {
     expect(
       determineCheckStatus([
