@@ -842,7 +842,6 @@ export const api = {
         loginUrl: string | null;
         userCode: string | null;
         lastError: string | null;
-        networkPolicyNote: string | null;
       };
     }>("/api/setup/codex-auth"),
 

@@ -112,7 +112,6 @@ export default function SetupPage() {
   const [codexLoginExpiresAt, setCodexLoginExpiresAt] = useState<string | null>(null);
   const [codexLoginState, setCodexLoginState] = useState("not_started");
   const [codexLoginError, setCodexLoginError] = useState<string | null>(null);
-  const [codexNetworkPolicyNote, setCodexNetworkPolicyNote] = useState<string | null>(null);
   const [codexLoginLoading, setCodexLoginLoading] = useState(false);
   const [codexDeviceCode, setCodexDeviceCode] = useState<string | null>(null);
   const [codexDeviceLoginUrl, setCodexDeviceLoginUrl] = useState<string | null>(null);
@@ -223,7 +222,6 @@ export default function SetupPage() {
         }
         setCodexLoginState(res.login.state);
         setCodexLoginError(res.login.lastError);
-        setCodexNetworkPolicyNote(res.login.networkPolicyNote);
         setCodexDeviceCode(res.login.userCode);
         setCodexDeviceLoginUrl(res.login.loginUrl);
       })
@@ -243,7 +241,6 @@ export default function SetupPage() {
           setCodexDeviceLoginUrl(res.login.loginUrl);
           setCodexLoginState(res.login.state);
           setCodexLoginError(res.login.lastError);
-          setCodexNetworkPolicyNote(res.login.networkPolicyNote);
           if (res.account?.status === "connected") setCodexAuthImported(true);
         })
         .catch(() => {});
@@ -1754,7 +1751,7 @@ export default function SetupPage() {
                           <CodexDeviceCode deviceCode={codexDeviceCode} />
                           {codexLoginState === "connected" && (
                             <p className="text-xs text-success flex items-center gap-1">
-                              <Check className="w-3 h-3" /> Shared Codex login imported
+                              <Check className="w-3 h-3" /> Logged in
                             </p>
                           )}
                           {(codexLoginState === "starting" ||
@@ -1766,9 +1763,6 @@ export default function SetupPage() {
                           )}
                           {codexLoginError && (
                             <p className="text-xs text-danger">{codexLoginError}</p>
-                          )}
-                          {codexNetworkPolicyNote && (
-                            <p className="text-xs text-text-muted">{codexNetworkPolicyNote}</p>
                           )}
                           <div className="flex flex-wrap gap-2">
                             <button
