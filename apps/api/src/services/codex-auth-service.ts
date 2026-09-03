@@ -19,9 +19,6 @@ const CODEX_LOGIN_DONE_PATH = "/tmp/optio-codex-login.done";
 const CODEX_AUTH_POD_TIMEOUT_MS = parseIntEnv("OPTIO_CODEX_AUTH_POD_TIMEOUT_MS", 15 * 60 * 1000);
 const CODEX_DEVICE_CODE_WAIT_MS = 8_000;
 const CODEX_DEVICE_CODE_POLL_MS = 250;
-const CODEX_AUTH_NETWORK_POLICY_NOTE =
-  "Optio does not currently enforce auth-pod egress to only OpenAI authentication hosts. " +
-  "Standard Kubernetes NetworkPolicy in this repo is port-based and cannot safely express the required hostname allowlist on its own.";
 
 function workspaceCondition(workspaceId?: string | null) {
   return workspaceId
@@ -127,7 +124,6 @@ export interface CodexAuthLoginStatus {
   loginUrl: string | null;
   userCode: string | null;
   lastError: string | null;
-  networkPolicyNote: string | null;
 }
 
 async function collectExecOutput(session: {
@@ -169,7 +165,6 @@ function buildBaseLoginStatus(
     podName: account?.loginPodName ?? null,
     expiresAt: account?.loginExpiresAt?.toISOString() ?? null,
     lastError: account?.lastError ?? null,
-    networkPolicyNote: CODEX_AUTH_NETWORK_POLICY_NOTE,
   };
 }
 

@@ -125,7 +125,6 @@ const CodexAuthAccountResponseSchema = z
       loginUrl: z.string().nullable(),
       userCode: z.string().nullable(),
       lastError: z.string().nullable(),
-      networkPolicyNote: z.string().nullable(),
     }),
   })
   .describe("Current managed Codex auth account state");
