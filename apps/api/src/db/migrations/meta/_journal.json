@@ -589,6 +589,13 @@
       "when": 1786450000000,
       "tag": "1786450000_codex_auth_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1786453600000,
+      "tag": "1786453600_codex_auth_login_pods",
+      "breakpoints": true
     }
   ]
 }
