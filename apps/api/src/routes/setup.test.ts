@@ -427,6 +427,10 @@ describe("POST /api/setup/codex-auth/session", () => {
         loginPodName: "optio-codex-auth-abcd1234",
       },
       authPod: { name: "optio-codex-auth-abcd1234" },
+      deviceAuth: {
+        loginUrl: "https://auth.openai.com/codex/device",
+        userCode: "ABCD-EFGH",
+      },
     });
 
     const res = await app.inject({
@@ -444,6 +448,11 @@ describe("POST /api/setup/codex-auth/session", () => {
       appServerUrl: "ws://localhost:3900/v1/connect",
     });
     expect(res.json().authPod.name).toBe("optio-codex-auth-abcd1234");
+    expect(res.json().login).toEqual({
+      state: "waiting_for_login",
+      loginUrl: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-EFGH",
+    });
   });
 });
 

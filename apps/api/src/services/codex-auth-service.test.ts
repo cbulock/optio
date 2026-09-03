@@ -152,7 +152,13 @@ describe("codex-auth-service", () => {
       id: "pod-handle-1",
       name: "optio-codex-auth-abcd1234",
     });
-    mockRuntime.exec.mockResolvedValue(execResult("started\n"));
+    mockRuntime.exec
+      .mockResolvedValueOnce(execResult("started\n"))
+      .mockResolvedValueOnce(
+        execResult(
+          "Open https://auth.openai.com/codex/device and enter code ABCD-EFGH\n__OPTIO_CODEX_AUTH__AUTH=0;DONE=0;EXIT=\n",
+        ),
+      );
 
     const result = await startCodexAuthSession({
       workspaceId: "ws-1",
@@ -168,6 +174,10 @@ describe("codex-auth-service", () => {
     expect(spec.env.OPTIO_GIT_CREDENTIAL_URL).toBeUndefined();
     expect(spec.env.GITHUB_TOKEN).toBeUndefined();
     expect(result.authPod.name).toBe("optio-codex-auth-abcd1234");
+    expect(result.deviceAuth).toEqual({
+      loginUrl: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-EFGH",
+    });
     expect(currentAccount.loginPodId).toBe("pod-handle-1");
     expect(currentAccount.loginPodName).toBe("optio-codex-auth-abcd1234");
     expect(currentAccount.loginSessionId).toBeNull();
