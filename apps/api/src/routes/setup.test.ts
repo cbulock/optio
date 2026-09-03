@@ -320,7 +320,6 @@ describe("GET /api/setup/codex-auth", () => {
         loginUrl: null,
         userCode: null,
         lastError: null,
-        networkPolicyNote: "gap",
       },
     });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
@@ -356,7 +355,6 @@ describe("GET /api/setup/codex-auth", () => {
         loginUrl: null,
         userCode: null,
         lastError: null,
-        networkPolicyNote: "gap",
       },
     });
     const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
