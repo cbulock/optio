@@ -229,7 +229,9 @@ export default function SetupPage() {
   }, []);
 
   useEffect(() => {
-    if (!codexAuthAccountId || codexAuthImported) return;
+    const loginInProgress =
+      codexLoginState === "starting" || codexLoginState === "waiting_for_login";
+    if ((!codexAuthAccountId || codexAuthImported) && !loginInProgress) return;
     const refresh = () =>
       api
         .getCodexAuthAccount()
@@ -247,7 +249,7 @@ export default function SetupPage() {
     void refresh();
     const interval = window.setInterval(refresh, 3000);
     return () => window.clearInterval(interval);
-  }, [codexAuthAccountId, codexAuthImported]);
+  }, [codexAuthAccountId, codexAuthImported, codexLoginState]);
 
   // Check if OAuth token is already stored when reaching the agents step
   useEffect(() => {
