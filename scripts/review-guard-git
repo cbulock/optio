@@ -14,4 +14,4 @@ if [ "${OPTIO_REVIEW_GUARD_ACTIVE:-}" = "1" ]; then
     *) echo "Optio review guard blocks mutable git operations." >&2; exit 126 ;;
   esac
 fi
-exec /opt/optio/git-real "$@"
+exec /opt/optio/git "$@"
