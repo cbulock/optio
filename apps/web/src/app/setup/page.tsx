@@ -1754,13 +1754,14 @@ export default function SetupPage() {
                               <Check className="w-3 h-3" /> Logged in
                             </p>
                           )}
-                          {(codexLoginState === "starting" ||
-                            codexLoginState === "waiting_for_login") && (
+                          {!codexDeviceCode &&
+                            (codexLoginState === "starting" ||
+                              codexLoginState === "waiting_for_login") && (
                             <p className="text-xs text-text-muted flex items-center gap-1">
                               <Loader2 className="w-3 h-3 animate-spin" /> Preparing your Codex
                               sign-in. The code will appear here automatically.
                             </p>
-                          )}
+                            )}
                           {codexLoginError && (
                             <p className="text-xs text-danger">{codexLoginError}</p>
                           )}
