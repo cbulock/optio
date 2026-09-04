@@ -558,7 +558,9 @@ export async function getCodexAuthLoginStatus(input: {
   account: Awaited<ReturnType<typeof getCodexAuthAccount>> | null;
   login: CodexAuthLoginStatus;
 }> {
-  let account = await getCodexAuthAccount(input.workspaceId);
+  // The managed Codex login is shared by every pod, so Settings must report
+  // the global account rather than a stale workspace-specific record.
+  let account = await getCodexAuthAccount();
   const base = buildBaseLoginStatus(account);
 
   if (!account) {
