@@ -1,0 +1,12 @@
+#!/bin/sh
+# See review-guard-git. GitHub review submission is the only permitted remote
+# mutation during a direct review task.
+if [ "${OPTIO_REVIEW_GUARD_ACTIVE:-}" = "1" ]; then
+  if [ "${1:-}" != "pr" ] || {
+    [ "${2:-}" != "diff" ] && [ "${2:-}" != "view" ] && [ "${2:-}" != "review" ];
+  }; then
+    echo "Optio review guard blocks this gh operation; only pr diff/view/review are allowed." >&2
+    exit 126
+  fi
+fi
+exec /opt/optio/gh-real "$@"

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -114,6 +114,7 @@ let daemonStderr = "";
 let daemonStdout = "";
 let cleaningUp = false;
 let reviewGuardDir = null;
+const REVIEW_EXEC_GUARD = "/opt/optio/review-exec-guard.so";
 
 process.on("SIGINT", () => void cleanup(130));
 process.on("SIGTERM", () => void cleanup(143));
@@ -121,6 +122,7 @@ process.on("SIGTERM", () => void cleanup(143));
 try {
   if (isReviewTask) {
     reviewGuardDir = await installReviewCommandGuards();
+    await enableReviewExecutionGuard();
   }
 
   daemon = spawn("codex", ["app-server", "--listen", listenUrl], {
@@ -497,9 +499,30 @@ exit 126
   emit({
     type: "message",
     role: "system",
-    content: "Review command guards enabled: code changes, pushes, and PR creation are blocked.",
+    content:
+      "Review execution guards enabled: repository writes and non-review GitHub operations are blocked.",
   });
   return dir;
+}
+
+async function enableReviewExecutionGuard() {
+  try {
+    await access(REVIEW_EXEC_GUARD);
+  } catch {
+    // Failing closed is intentional. A review with the normal execution
+    // sandbox but no process-level guard could mutate the repository.
+    throw new Error(
+      `Optio review guard is missing at ${REVIEW_EXEC_GUARD}; refusing unsafe review run`,
+    );
+  }
+
+  // This is inherited by Codex and every normally-spawned descendant. Unlike
+  // PATH-only shims, it sees absolute binary paths, shell wrappers, env resets,
+  // and Node/Python child processes. It protects /workspace from writes and
+  // permits only gh pr diff/view/review plus read-only git subcommands.
+  const inherited = process.env.LD_PRELOAD;
+  process.env.LD_PRELOAD = inherited ? `${REVIEW_EXEC_GUARD}:${inherited}` : REVIEW_EXEC_GUARD;
+  process.env.OPTIO_REVIEW_GUARD_ACTIVE = "1";
 }
 
 function collectDaemonOutput() {

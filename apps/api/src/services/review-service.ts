@@ -12,6 +12,9 @@ import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
 import { resolveReviewConfig } from "./review-config.js";
 import * as optioSettingsService from "./optio-settings-service.js";
+import { db } from "../db/client.js";
+import { tasks } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 
 /**
  * Fetch PR description, reviews, and comments to give the
@@ -110,7 +113,9 @@ export async function launchReview(parentTaskId: string): Promise<string> {
   // Fetch PR context using platform abstraction
   const prContextPromise = fetchPrContext(parentTask.repoUrl, prNumber, parentTask.createdBy);
 
-  // Create the review task as a subtask
+  // Create the review task as a subtask. The fully rendered review context is
+  // persisted below once the PR context arrives; retries must never fall back
+  // to a parent's coding prompt or .optio/task.md.
   const { createSubtask } = await import("./subtask-service.js");
 
   const subtask = await createSubtask({
@@ -179,6 +184,23 @@ export async function launchReview(parentTaskId: string): Promise<string> {
 
   const reviewContext = reviewContextParts.join("\n");
 
+  const reviewOverride = {
+    renderedPrompt,
+    taskFileContent: reviewContext,
+    taskFilePath: REVIEW_TASK_FILE_PATH,
+    // Agent-agnostic model field — read by the worker for any review agent.
+    model: review.model,
+    // Back-compat for in-flight workers that still read claudeModel.
+    claudeModel: review.model,
+  };
+
+  // A BullMQ retry/reconcile may contain only taskId. Persist the exact review
+  // input on the review task so every execution is review-only.
+  await db
+    .update(tasks)
+    .set({ metadata: { ...(reviewTask.metadata ?? {}), reviewOverride }, updatedAt: new Date() })
+    .where(eq(tasks.id, reviewTask.id));
+
   // Queue the review task
   await taskService.transitionTask(reviewTask.id, TaskState.QUEUED, "review_requested");
   await taskQueue.add(
@@ -186,16 +208,7 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     {
       taskId: reviewTask.id,
       // Override the prompt and task file for the review
-      reviewOverride: {
-        renderedPrompt,
-        taskFileContent: reviewContext,
-        taskFilePath: REVIEW_TASK_FILE_PATH,
-        // Agent-agnostic model field — read by the worker for any review agent.
-        model: review.model,
-        // Back-compat: keep populating claudeModel for one release so
-        // in-flight workers that pre-date the resolver still find a model.
-        claudeModel: review.model,
-      },
+      reviewOverride,
     },
     {
       jobId: `${reviewTask.id}`,

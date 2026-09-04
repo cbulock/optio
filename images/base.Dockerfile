@@ -9,6 +9,18 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+# A root-owned LD_PRELOAD guard is used only by Codex review runs. It closes
+# PATH, absolute-path, shell-wrapper, and common subprocess bypasses in the
+# long-lived repo pod where Bubblewrap user namespaces are unavailable.
+COPY scripts/review-exec-guard.c /tmp/review-exec-guard.c
+COPY scripts/review-guard-git scripts/review-guard-gh /opt/optio/
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && mkdir -p /opt/optio \
+    && gcc -shared -fPIC -O2 -Wall -Wextra -o /opt/optio/review-exec-guard.so /tmp/review-exec-guard.c -ldl \
+    && rm -f /tmp/review-exec-guard.c \
+    && apt-get purge -y --auto-remove gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -16,6 +28,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep the command boundaries at the canonical absolute paths. The guard is
+# inactive for normal coding tasks and for pod setup; it activates only in the
+# Codex review app-server child environment.
+RUN mv /usr/bin/git /opt/optio/git-real \
+    && mv /usr/bin/gh /opt/optio/gh-real \
+    && chmod 755 /opt/optio/review-guard-git /opt/optio/review-guard-gh \
+    && ln -s /opt/optio/review-guard-git /usr/bin/git \
+    && ln -s /opt/optio/review-guard-gh /usr/bin/gh
 
 # GitLab CLI
 ARG GLAB_VERSION=1.91.0

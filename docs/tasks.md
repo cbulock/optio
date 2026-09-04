@@ -28,6 +28,14 @@ A Repo Task targets a specific repository and ends by opening a pull request. Th
 
 Use a Repo Task when the work produces code: bug fixes, features, refactors, dependency bumps, doc edits — anything that wants to land as a reviewed PR.
 
+### Codex review execution boundary
+
+Codex review subtasks persist their rendered PR-specific prompt and review context on the task itself. A retry therefore cannot fall back to a coding prompt or `.optio/task.md`; legacy review rows without durable review context fail closed and must be relaunched.
+
+In the standard agent image, Codex reviews run with a defence-in-depth boundary: root-owned wrappers at the canonical `git` and `gh` paths permit only read-only Git commands and `gh pr diff`, `view`, or `review`; an inherited execution guard blocks common write/install/network commands and workspace file mutations. Coding tasks do not receive this boundary.
+
+This is deliberately not described as a hostile-code sandbox. A model with the ability to execute arbitrary native syscalls, exploit a privileged container/runtime, or access credentials through an unguarded custom client can evade user-space guards. Deployments that need that stronger guarantee should run reviews in a separate read-only pod with restrictive Kubernetes security and egress policy.
+
 ### Standalone Task — no repo
 
 A Standalone Task runs an agent in an isolated pod with no repo checkout. It produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue.

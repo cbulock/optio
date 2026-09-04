@@ -1,0 +1,17 @@
+#!/bin/sh
+# Root-owned command boundary for review-only Codex descendants. Keep this at
+# /usr/bin/git (the old binary lives beside Optio) so absolute paths and PATH
+# resets cannot bypass it.
+if [ "${OPTIO_REVIEW_GUARD_ACTIVE:-}" = "1" ]; then
+  case "${1:-}" in
+    diff|show|status|log|rev-parse|ls-files|grep|blame|cat-file|show-ref|symbolic-ref)
+      ;;
+    branch)
+      [ "${2:-}" = "--show-current" ] || {
+        echo "Optio review guard blocks mutable git operations." >&2; exit 126;
+      }
+      ;;
+    *) echo "Optio review guard blocks mutable git operations." >&2; exit 126 ;;
+  esac
+fi
+exec /opt/optio/git-real "$@"
