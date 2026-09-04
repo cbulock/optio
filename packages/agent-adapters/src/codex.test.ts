@@ -90,8 +90,14 @@ describe("CodexAdapter", () => {
     it("sets correct env vars", () => {
       const config = adapter.buildContainerConfig(baseInput);
       expect(config.env.OPTIO_TASK_ID).toBe("test-123");
+      expect(config.env.OPTIO_TASK_TYPE).toBe("coding");
       expect(config.env.OPTIO_AGENT_TYPE).toBe("codex");
       expect(config.env.OPTIO_BRANCH_NAME).toBe("optio/task-test-123");
+    });
+
+    it("marks review tasks for the read-only app-server sandbox", () => {
+      const config = adapter.buildContainerConfig({ ...baseInput, taskType: "review" });
+      expect(config.env.OPTIO_TASK_TYPE).toBe("review");
     });
 
     it("requires correct secrets in api-key mode", () => {

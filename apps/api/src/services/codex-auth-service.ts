@@ -273,7 +273,7 @@ async function probeAuthPod(handle: ContainerHandle) {
 
 async function waitForCodexDeviceAuth(handle: ContainerHandle) {
   const deadline = Date.now() + CODEX_DEVICE_CODE_WAIT_MS;
-  let details = { loginUrl: null, userCode: null };
+  let details: ReturnType<typeof extractCodexDeviceAuth> = { loginUrl: null, userCode: null };
   while (Date.now() < deadline) {
     const probe = await probeAuthPod(handle);
     details = extractCodexDeviceAuth(probe.logOutput);

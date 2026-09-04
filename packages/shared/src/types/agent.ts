@@ -6,6 +6,8 @@ export type OpenClawAuthMode = "api-key";
 
 export interface AgentTaskInput {
   taskId: string;
+  /** Review tasks run with a read-only agent sandbox. */
+  taskType?: "coding" | "review";
   prompt: string;
   repoUrl: string;
   repoBranch: string;

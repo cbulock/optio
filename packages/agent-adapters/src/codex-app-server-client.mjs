@@ -81,6 +81,7 @@ class JsonRpcClient {
 }
 
 const prompt = process.env.OPTIO_PROMPT ?? "";
+const isReviewTask = process.env.OPTIO_TASK_TYPE === "review";
 
 if (!prompt.trim()) {
   emit({ type: "error", message: "OPTIO_PROMPT is required for Codex app-server mode" });
@@ -160,7 +161,9 @@ try {
   const threadResp = await client.request("thread/start", {
     cwd: process.cwd(),
     approvalPolicy: "never",
-    sandbox: "danger-full-access",
+    // A review must not be able to modify the checkout, push a branch, or
+    // create a pull request. Coding tasks retain their existing write access.
+    sandbox: isReviewTask ? "read-only" : "danger-full-access",
   });
   const threadId = threadResp?.thread?.id;
   if (!threadId) {
@@ -259,10 +262,7 @@ try {
 } catch (error) {
   emit({
     type: "error",
-    message:
-      error instanceof Error
-        ? error.message
-        : "Codex app-server execution failed",
+    message: error instanceof Error ? error.message : "Codex app-server execution failed",
   });
   await cleanup(1);
   process.exit(1);
@@ -327,8 +327,7 @@ function emitCompletedItem(item, threadId, streamedAgentItems) {
         id: threadId,
         type: "function_call_output",
         call_id: item.id,
-        output:
-          typeof item.result === "string" ? item.result : JSON.stringify(item.result),
+        output: typeof item.result === "string" ? item.result : JSON.stringify(item.result),
       });
     }
     return;
