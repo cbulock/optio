@@ -1680,7 +1680,9 @@ function CodexSettings() {
   }, []);
 
   useEffect(() => {
-    if (!codexAuthAccountId || codexAuthImported) return;
+    const loginInProgress =
+      codexLoginState === "starting" || codexLoginState === "waiting_for_login";
+    if ((!codexAuthAccountId || codexAuthImported) && !loginInProgress) return;
     const refresh = () =>
       api
         .getCodexAuthAccount()
@@ -1698,7 +1700,7 @@ function CodexSettings() {
     void refresh();
     const interval = window.setInterval(refresh, 3000);
     return () => window.clearInterval(interval);
-  }, [codexAuthAccountId, codexAuthImported]);
+  }, [codexAuthAccountId, codexAuthImported, codexLoginState]);
 
   const validateOpenai = async (keyOverride?: string) => {
     const key = (keyOverride ?? openaiKey).trim();
