@@ -377,7 +377,7 @@ export async function upsertCodexAuthAccount(input: {
   appServerUrl: string;
   authJson?: string;
 }) {
-  const existing = await getCodexAuthAccount(input.workspaceId);
+  const existing = await getCodexAuthAccount();
   const now = new Date();
   const trimmedAuthJson = input.authJson?.trim();
 
@@ -487,7 +487,7 @@ export async function startCodexAuthSession(input: {
   userId?: string;
   appServerUrl: string;
 }) {
-  const existing = await getCodexAuthAccount(input.workspaceId);
+  const existing = await getCodexAuthAccount();
   if (existing?.loginPodName) {
     await cleanupAuthPod(existing, { status: "pending", lastError: null });
   }
@@ -541,7 +541,7 @@ export async function startCodexAuthSession(input: {
 }
 
 export async function cancelCodexAuthSession(input: { workspaceId?: string | null }) {
-  const account = await getCodexAuthAccount(input.workspaceId);
+  const account = await getCodexAuthAccount();
   if (!account) return { canceled: false as const };
   if (account.loginPodName) {
     await cleanupAuthPod(account, { status: "pending", lastError: null });
@@ -611,7 +611,7 @@ export async function getCodexAuthLoginStatus(input: {
     if (account.loginExpiresAt && account.loginExpiresAt.getTime() <= Date.now()) {
       const message = "The managed Codex auth pod timed out before login completed.";
       await cleanupAuthPod(account, { status: "error", lastError: message });
-      account = await getCodexAuthAccount(input.workspaceId);
+      account = await getCodexAuthAccount();
       return {
         account,
         login: {
@@ -646,7 +646,7 @@ export async function getCodexAuthLoginStatus(input: {
           podStatus.reason ??
           `The managed Codex auth pod entered terminal state ${podStatus.state}.`;
         await cleanupAuthPod(account, { status: "error", lastError: message });
-        account = await getCodexAuthAccount(input.workspaceId);
+        account = await getCodexAuthAccount();
         return {
           account,
           login: {
@@ -667,7 +667,7 @@ export async function getCodexAuthLoginStatus(input: {
       if (probe.authDetected) {
         try {
           await importCodexAuthFromPodAccount(account);
-          account = await getCodexAuthAccount(input.workspaceId);
+          account = await getCodexAuthAccount();
           return {
             account,
             login: {
@@ -682,7 +682,7 @@ export async function getCodexAuthLoginStatus(input: {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           await cleanupAuthPod(account, { status: "error", lastError: message });
-          account = await getCodexAuthAccount(input.workspaceId);
+          account = await getCodexAuthAccount();
           return {
             account,
             login: {
@@ -704,7 +704,7 @@ export async function getCodexAuthLoginStatus(input: {
             ? `Codex login exited with status ${probe.exitCode} before auth.json was created.`
             : "Codex login ended without producing auth.json.";
         await cleanupAuthPod(account, { status: "error", lastError: message });
-        account = await getCodexAuthAccount(input.workspaceId);
+        account = await getCodexAuthAccount();
         return {
           account,
           login: {
@@ -733,7 +733,7 @@ export async function getCodexAuthLoginStatus(input: {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await cleanupAuthPod(account, { status: "error", lastError: message });
-      account = await getCodexAuthAccount(input.workspaceId);
+      account = await getCodexAuthAccount();
       return {
         account,
         login: {
@@ -785,7 +785,7 @@ export async function getCodexAuthLoginStatus(input: {
       const { loginUrl, userCode } = extractCodexDeviceAuth(logOutput);
       if (authDetected) {
         await importCodexAuthFromLegacySessionAccount(account, input.userId);
-        account = await getCodexAuthAccount(input.workspaceId);
+        account = await getCodexAuthAccount();
         return {
           account,
           login: {
@@ -844,7 +844,7 @@ export async function importCodexAuthFromSession(input: {
   userId?: string;
   sessionId?: string;
 }) {
-  const account = await getCodexAuthAccount(input.workspaceId);
+  const account = await getCodexAuthAccount();
   if (!account) {
     throw new Error("No managed Codex account exists");
   }
