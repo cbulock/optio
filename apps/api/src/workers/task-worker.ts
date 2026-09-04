@@ -63,6 +63,7 @@ import {
 import { emitCostReportLog } from "../telemetry/logs.js";
 import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
+import { resolveReviewTaskInput, type ReviewTaskOverride } from "../services/review-task-input.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -107,12 +108,7 @@ export function startTaskWorker() {
         resumePrompt?: string;
         restartFromBranch?: boolean;
         provisioningRetryCount?: number;
-        reviewOverride?: {
-          renderedPrompt: string;
-          taskFileContent: string;
-          taskFilePath: string;
-          claudeModel?: string;
-        };
+        reviewOverride?: ReviewTaskOverride;
       };
       const log = logger.child({ taskId, jobId: job.id });
       let repoPodId: string | null = null;
@@ -253,6 +249,15 @@ export function startTaskWorker() {
         const task = await taskService.getTask(taskId);
         if (!task) throw new Error(`Task not found: ${taskId}`);
 
+        // Queue payloads are not durable: a retry can contain only a task id.
+        // A review must therefore recover its dedicated prompt/context from
+        // its own metadata. Never fall back to a parent coding prompt.
+        const effectiveReviewOverride = resolveReviewTaskInput({
+          taskType: task.taskType,
+          metadata: task.metadata,
+          queuedOverride: reviewOverride,
+        });
+
         // Get agent adapter and build config
         const adapter = getAdapter(task.agentType);
         const claudeAuthMode =
@@ -333,7 +338,7 @@ export function startTaskWorker() {
 
         // Enable planning mode for fresh runs (not resumed) when repo has it enabled
         const isPlanningRun =
-          !!repoConfig?.planningModeEnabled && !resumeSessionId && !reviewOverride;
+          !!repoConfig?.planningModeEnabled && !resumeSessionId && !effectiveReviewOverride;
 
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
@@ -361,15 +366,15 @@ export function startTaskWorker() {
         });
 
         // Apply review overrides if this is a review task
-        const finalRenderedPrompt = reviewOverride?.renderedPrompt ?? renderedPrompt;
-        const finalTaskFileContent = reviewOverride?.taskFileContent ?? taskFileContent;
-        const finalTaskFilePath = reviewOverride?.taskFilePath ?? taskFilePath;
+        const finalRenderedPrompt = effectiveReviewOverride?.renderedPrompt ?? renderedPrompt;
+        const finalTaskFileContent = effectiveReviewOverride?.taskFileContent ?? taskFileContent;
+        const finalTaskFilePath = effectiveReviewOverride?.taskFilePath ?? taskFilePath;
         const finalClaudeModel =
-          reviewOverride?.claudeModel ?? repoConfig?.claudeModel ?? undefined;
+          effectiveReviewOverride?.claudeModel ?? repoConfig?.claudeModel ?? undefined;
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
-          taskType: task.taskType === "review" ? "review" : "coding",
+          taskType: effectiveReviewOverride || task.taskType === "review" ? "review" : "coding",
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
@@ -820,7 +825,7 @@ export function startTaskWorker() {
         // If a previous run already opened a PR for this task's branch,
         // skip the agent entirely and transition straight to pr_opened.
         // This avoids wasting compute on tasks killed by restarts/reconcile.
-        const isReviewTask0 = !!reviewOverride || task.taskType === "review";
+        const isReviewTask0 = !!effectiveReviewOverride || task.taskType === "review";
         if (!restartFromBranch && !resumeSessionId && !isReviewTask0) {
           const existingPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
           if (existingPr) {
@@ -843,7 +848,7 @@ export function startTaskWorker() {
         // Build the agent command based on type. `pr_review` no longer
         // exists as a tasks.taskType — external PR reviews run under
         // pr_review_runs via pr-review-worker.ts.
-        const isReviewTask = !!reviewOverride || task.taskType === "review";
+        const isReviewTask = !!effectiveReviewOverride || task.taskType === "review";
         const agentCommand = buildAgentCommand(task.agentType, allEnv, {
           resumeSessionId,
           resumePrompt,

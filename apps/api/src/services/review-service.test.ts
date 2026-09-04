@@ -139,6 +139,19 @@ describe("launchReview", () => {
     // Verify task was transitioned to queued
     expect(mockTransitionTask).toHaveBeenCalledWith("review-1", "queued", "review_requested");
 
+    // The same review-only input is persisted for retry/reconcile jobs that
+    // no longer carry BullMQ's ephemeral reviewOverride payload.
+    expect(db.update).toHaveBeenCalled();
+    expect(db.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          reviewOverride: expect.objectContaining({
+            taskFilePath: ".optio/review-context.md",
+          }),
+        }),
+      }),
+    );
+
     // Verify job was added to queue with review overrides. Both `model`
     // (new agent-agnostic field) and `claudeModel` (back-compat) are set.
     expect(mockQueueAdd).toHaveBeenCalledWith(

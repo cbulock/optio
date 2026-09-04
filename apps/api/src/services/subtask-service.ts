@@ -14,6 +14,8 @@ export interface SubtaskInput {
   blocksParent?: boolean;
   agentType?: string;
   priority?: number;
+  /** Durable execution data for retries (for example, rendered review context). */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -41,6 +43,7 @@ export async function createSubtask(input: SubtaskInput) {
     // Inherit the parent's workspace so subtasks (incl. review subtasks)
     // stay visible in the workspace-scoped UI.
     workspaceId: parent.workspaceId ?? null,
+    metadata: input.metadata,
   });
 
   // Set subtask fields
