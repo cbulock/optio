@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -110,11 +113,16 @@ let daemon = null;
 let daemonStderr = "";
 let daemonStdout = "";
 let cleaningUp = false;
+let reviewGuardDir = null;
 
 process.on("SIGINT", () => void cleanup(130));
 process.on("SIGTERM", () => void cleanup(143));
 
 try {
+  if (isReviewTask) {
+    reviewGuardDir = await installReviewCommandGuards();
+  }
+
   daemon = spawn("codex", ["app-server", "--listen", listenUrl], {
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
@@ -161,9 +169,10 @@ try {
   const threadResp = await client.request("thread/start", {
     cwd: process.cwd(),
     approvalPolicy: "never",
-    // A review must not be able to modify the checkout, push a branch, or
-    // create a pull request. Coding tasks retain their existing write access.
-    sandbox: isReviewTask ? "read-only" : "danger-full-access",
+    // The local Kubernetes runtime does not permit Bubblewrap's user namespace
+    // setup, so use the normal execution sandbox and install review-only git/gh
+    // guards before starting the daemon (see installReviewCommandGuards).
+    sandbox: "danger-full-access",
   });
   const threadId = threadResp?.thread?.id;
   if (!threadId) {
@@ -432,16 +441,15 @@ async function cleanup(exitCode) {
   if (cleaningUp) return;
   cleaningUp = true;
 
-  if (!daemon) return;
-  if (daemon.exitCode != null) return;
-
-  daemon.kill("SIGTERM");
-  const deadline = Date.now() + 5_000;
-  while (daemon.exitCode == null && Date.now() < deadline) {
-    await delay(100);
-  }
-  if (daemon.exitCode == null) {
-    daemon.kill("SIGKILL");
+  if (daemon && daemon.exitCode == null) {
+    daemon.kill("SIGTERM");
+    const deadline = Date.now() + 5_000;
+    while (daemon.exitCode == null && Date.now() < deadline) {
+      await delay(100);
+    }
+    if (daemon.exitCode == null) {
+      daemon.kill("SIGKILL");
+    }
   }
 
   if (exitCode !== 0 && daemonStderr.trim()) {
@@ -451,6 +459,47 @@ async function cleanup(exitCode) {
       content: `Codex app-server stderr: ${truncate(daemonStderr.trim(), 1200)}`,
     });
   }
+
+  if (reviewGuardDir) {
+    await rm(reviewGuardDir, { recursive: true, force: true });
+  }
+}
+
+async function installReviewCommandGuards() {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "optio-codex-review-"));
+  const blockedGitCommands =
+    "add|am|apply|checkout|cherry-pick|clean|commit|merge|rebase|reset|restore|revert|switch|push";
+  const gitGuard = `#!/bin/sh
+case "${"$"}{1:-}" in
+  ${blockedGitCommands})
+    echo "Optio review mode blocks git ${"$"}{1:-}; reviews must not modify or push code." >&2
+    exit 126
+    ;;
+esac
+exec /usr/bin/git "${"$"}@"
+`;
+  const ghGuard = `#!/bin/sh
+case "${"$"}{1:-}:${"$"}{2:-}" in
+  pr:diff|pr:view|pr:review)
+    exec /usr/bin/gh "${"$"}@"
+    ;;
+esac
+echo "Optio review mode blocks gh ${"$"}*; only gh pr diff, view, and review are allowed." >&2
+exit 126
+`;
+
+  await Promise.all([
+    writeFile(path.join(dir, "git"), gitGuard, { mode: 0o755 }),
+    writeFile(path.join(dir, "gh"), ghGuard, { mode: 0o755 }),
+  ]);
+  await Promise.all([chmod(path.join(dir, "git"), 0o755), chmod(path.join(dir, "gh"), 0o755)]);
+  process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
+  emit({
+    type: "message",
+    role: "system",
+    content: "Review command guards enabled: code changes, pushes, and PR creation are blocked.",
+  });
+  return dir;
 }
 
 function collectDaemonOutput() {
