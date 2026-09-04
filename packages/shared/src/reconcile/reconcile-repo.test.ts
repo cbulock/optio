@@ -599,8 +599,8 @@ describe("reconcileRepo — PR_OPENED", () => {
     if (action.kind === "resumeAgent") expect(action.resumeReason).toBe("ci_failure");
   });
 
-  it("CI passing + on_ci_pass review → launchReview after a missed transition", () => {
-    const s = snapshot({}, openedStatus({ prChecksStatus: "passing" }), {
+  it("CI just passed + on_ci_pass review → launchReview", () => {
+    const s = snapshot({}, openedStatus({ prChecksStatus: "pending" }), {
       pr: makePr({ checksStatus: "passing" }),
       settings: {
         stallThresholdMs: 300_000,
