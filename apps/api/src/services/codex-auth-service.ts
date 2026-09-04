@@ -438,7 +438,9 @@ export async function getCodexAppServerConfig(opts: {
   workspaceId?: string | null;
   userId?: string | null;
 }) {
-  const account = await getCodexAuthAccount(opts.workspaceId);
+  // Codex login is deliberately shared across all repo pods, not scoped to
+  // the workspace that happened to start a task.
+  const account = await getCodexAuthAccount();
   const codexAuthJson = (await retrieveSecretWithFallback(
     "CODEX_AUTH_JSON",
     "global",
