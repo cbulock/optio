@@ -459,6 +459,27 @@ export async function getCodexAppServerConfig(opts: {
   };
 }
 
+/**
+ * Codex app-server writes its refreshed credentials to the standard Codex
+ * home. Copy that state back to Optio's one shared credential after a run so
+ * later pods never receive a rotated, stale refresh token.
+ */
+export async function syncCodexAuthFromRepoPod(input: {
+  handle: ContainerHandle;
+}): Promise<boolean> {
+  const exec = await getRuntime().exec(
+    input.handle,
+    ["bash", "-lc", `test -s ${CODEX_AUTH_PATH} && cat ${CODEX_AUTH_PATH} || true`],
+    { tty: false },
+  );
+  const result = await collectExecOutput(exec);
+  if (!result.stdout.trim()) return false;
+
+  const authJson = JSON.stringify(JSON.parse(result.stdout));
+  await storeSecret("CODEX_AUTH_JSON", authJson, "global");
+  return true;
+}
+
 export async function startCodexAuthSession(input: {
   workspaceId?: string | null;
   userId?: string;

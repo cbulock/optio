@@ -107,6 +107,7 @@ import {
   extractCodexDeviceAuth,
   getCodexAuthLoginStatus,
   startCodexAuthSession,
+  syncCodexAuthFromRepoPod,
 } from "./codex-auth-service.js";
 
 function execResult(stdoutText: string, stderrText = "") {
@@ -182,6 +183,20 @@ describe("codex-auth-service", () => {
     expect(currentAccount.loginPodName).toBe("optio-codex-auth-abcd1234");
     expect(currentAccount.loginSessionId).toBeNull();
     expect(currentAccount.loginSessionRepoUrl).toBeNull();
+  });
+
+  it("copies refreshed repo-pod auth back to the shared credential", async () => {
+    mockRuntime.exec.mockResolvedValue(execResult('{"access_token":"fresh"}'));
+
+    await expect(
+      syncCodexAuthFromRepoPod({ handle: { id: "pod-1", name: "pod-1" } }),
+    ).resolves.toBe(true);
+
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "CODEX_AUTH_JSON",
+      '{"access_token":"fresh"}',
+      "global",
+    );
   });
 
   it("auto-imports auth.json from the pod and destroys it on success", async () => {
