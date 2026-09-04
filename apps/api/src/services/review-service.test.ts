@@ -142,7 +142,7 @@ describe("launchReview", () => {
     // The same review-only input is persisted for retry/reconcile jobs that
     // no longer carry BullMQ's ephemeral reviewOverride payload.
     expect(db.update).toHaveBeenCalled();
-    expect(db.set).toHaveBeenCalledWith(
+    expect((db as unknown as { set: ReturnType<typeof vi.fn> }).set).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
           reviewOverride: expect.objectContaining({

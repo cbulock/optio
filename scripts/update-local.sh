@@ -113,7 +113,19 @@ echo "   Images built."
 # Deploy immutable tags. Reusing Helm values without explicit tags can retain
 # old images, producing a successful rollout that serves stale code.
 echo "[4/4] Deploying freshly built images..."
+# A new encryption key makes every credential already stored in Postgres
+# unreadable. An update must reuse the cluster's existing key and fail before
+# changing the release if it cannot find one; setup-local.sh is responsible for
+# generating the key on first installation.
+ENCRYPTION_KEY="$(kubectl get secret optio-config -n optio \
+  -o jsonpath='{.data.OPTIO_ENCRYPTION_KEY}' 2>/dev/null | base64 -d || true)"
+if [ -z "$ENCRYPTION_KEY" ]; then
+  echo "Cannot read the existing Optio encryption key from optio-config." >&2
+  echo "Run ./scripts/setup-local.sh to initialize the local cluster." >&2
+  exit 1
+fi
 helm upgrade optio helm/optio -n optio -f helm/optio/values.local.yaml --reuse-values \
+  --set-string "encryption.key=$ENCRYPTION_KEY" \
   --set "api.image.tag=$LOCAL_IMAGE_TAG" \
   --set "web.image.tag=$LOCAL_IMAGE_TAG"
 
