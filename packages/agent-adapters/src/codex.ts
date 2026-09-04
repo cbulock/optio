@@ -65,6 +65,7 @@ export class CodexAdapter implements AgentAdapter {
 
     const env: Record<string, string> = {
       OPTIO_TASK_ID: input.taskId,
+      OPTIO_TASK_TYPE: input.taskType ?? "coding",
       OPTIO_REPO_URL: input.repoUrl,
       OPTIO_REPO_BRANCH: input.repoBranch,
       OPTIO_PROMPT: prompt,

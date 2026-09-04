@@ -369,6 +369,7 @@ export function startTaskWorker() {
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
+          taskType: task.taskType === "review" ? "review" : "coding",
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
