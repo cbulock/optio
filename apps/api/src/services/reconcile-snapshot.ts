@@ -401,8 +401,14 @@ function mapRepoPodPhase(state: string): PodStatus["phase"] {
 
 async function loadRepoSettings(repoUrl: string, workspaceId: string | null) {
   // Match the normal repository lookup semantics: legacy tasks without a
-  // workspace still inherit settings from the default workspace.
-  const row = await getRepoByUrl(repoUrl, workspaceId);
+  // workspace inherit settings from the default workspace. If that does not
+  // find one, a single repository configuration is unambiguous regardless of
+  // its workspace and can safely be used for the legacy task.
+  let row = await getRepoByUrl(repoUrl, workspaceId);
+  if (!row && !workspaceId) {
+    const matches = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl)).limit(2);
+    if (matches.length === 1) row = matches[0];
+  }
   if (!row) return null;
   return {
     autoMerge: row.autoMerge ?? false,
