@@ -51,6 +51,7 @@ import type {
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { determineCheckStatus, determineReviewStatus } from "../workers/pr-watcher-worker.js";
 import { checkBlockingSubtasks } from "./subtask-service.js";
+import { getRepoByUrl } from "./repo-service.js";
 import { logger } from "../logger.js";
 
 /**
@@ -399,13 +400,9 @@ function mapRepoPodPhase(state: string): PodStatus["phase"] {
 }
 
 async function loadRepoSettings(repoUrl: string, workspaceId: string | null) {
-  const conditions = [eq(repos.repoUrl, repoUrl)];
-  if (workspaceId) conditions.push(eq(repos.workspaceId, workspaceId));
-  const [row] = await db
-    .select()
-    .from(repos)
-    .where(and(...conditions))
-    .limit(1);
+  // Share normal repository lookup semantics with task creation and review
+  // launching, including the safe legacy-task fallback.
+  const row = await getRepoByUrl(repoUrl, workspaceId);
   if (!row) return null;
   return {
     autoMerge: row.autoMerge ?? false,

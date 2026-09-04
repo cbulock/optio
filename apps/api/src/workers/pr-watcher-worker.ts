@@ -24,7 +24,7 @@ export function determineCheckStatus(
   if (checkRuns.length === 0) return "none";
   const allComplete = checkRuns.every((r) => r.status === "completed");
   const allSuccess = checkRuns.every(
-    (r) => r.conclusion === "success" || r.conclusion === "skipped",
+    (r) => r.conclusion === "success" || r.conclusion === "skipped" || r.conclusion === "neutral",
   );
   if (!allComplete) return "pending";
   if (allSuccess) return "passing";

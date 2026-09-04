@@ -147,8 +147,17 @@ export async function getRepoByUrl(
     .select()
     .from(repos)
     .where(and(...conditions));
-  if (!repo) return null;
-  return decryptRepoRow(repo);
+  if (repo) return decryptRepoRow(repo);
+
+  // Legacy tasks may predate workspace assignment. If the repository has one
+  // unambiguous configuration, use it even when it belongs to a non-default
+  // workspace. Multiple configurations remain intentionally unresolved.
+  if (!workspaceId) {
+    const matches = await db.select().from(repos).where(eq(repos.repoUrl, normalized));
+    if (matches.length === 1) return decryptRepoRow(matches[0]);
+  }
+
+  return null;
 }
 
 export async function createRepo(data: {
