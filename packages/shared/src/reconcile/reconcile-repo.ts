@@ -435,13 +435,15 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
     };
   }
 
-  // CI just passed → trigger review if configured for on_ci_pass.
+  // CI passing → trigger review if configured for on_ci_pass. This is
+  // intentionally level-triggered: a watcher restart or delayed repository
+  // settings lookup must not permanently lose the original passing edge.
   if (
     pr.checksStatus === "passing" &&
-    prev.checks !== "passing" &&
     pr.state === "open" &&
     snapshot.settings.reviewEnabled &&
     snapshot.settings.reviewTrigger === "on_ci_pass" &&
+    (prev.checks !== "passing" || !snapshot.settings.autoMerge) &&
     !snapshot.settings.hasReviewSubtask
   ) {
     return { kind: "launchReview", reason: "ci_passing_launch_review" };
