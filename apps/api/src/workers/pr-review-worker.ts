@@ -44,7 +44,10 @@ import {
 } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
-import { getCodexAppServerConfig } from "../services/codex-auth-service.js";
+import {
+  getCodexAppServerConfig,
+  syncCodexAuthFromRepoPod,
+} from "../services/codex-auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -457,6 +460,13 @@ export function startPrReviewWorker() {
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
+        if (agentType === "codex" && codexAuthMode === "app-server") {
+          allEnv.OPTIO_CODEX_AUTH_JSON_B64 =
+            typeof codexAuthJson === "string" && codexAuthJson.length > 0
+              ? Buffer.from(codexAuthJson, "utf8").toString("base64")
+              : "";
+        }
+
         for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
           if (!allEnv[secretName]) {
             const val = await retrieveSecretWithFallback(secretName, "global", workspaceId).catch(
@@ -512,12 +522,6 @@ export function startPrReviewWorker() {
             : {}),
           ...(allEnv.OPTIO_SETUP_COMMANDS
             ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-          ...(agentType === "codex" &&
-          codexAuthMode === "app-server" &&
-          typeof codexAuthJson === "string" &&
-          codexAuthJson.length > 0
-            ? { OPTIO_CODEX_AUTH_JSON_B64: Buffer.from(codexAuthJson, "utf8").toString("base64") }
             : {}),
         };
         const setupSecrets = await resolveSecretsForSetup(review.repoUrl, workspaceId);
@@ -678,6 +682,11 @@ export function startPrReviewWorker() {
 
         if (stderrData) {
           log.warn({ stderrPreview: stderrData.slice(0, 500) }, "Exec stderr");
+        }
+        if (agentType === "codex" && codexAuthMode === "app-server") {
+          await syncCodexAuthFromRepoPod({
+            handle: { id: pod.podId ?? pod.podName!, name: pod.podName! },
+          }).catch((err) => log.warn({ err }, "Failed to sync refreshed Codex auth from repo pod"));
         }
 
         // ── Parse result ────────────────────────────────────────

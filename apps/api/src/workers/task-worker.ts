@@ -45,7 +45,10 @@ import {
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
-import { getCodexAppServerConfig } from "../services/codex-auth-service.js";
+import {
+  getCodexAppServerConfig,
+  syncCodexAuthFromRepoPod,
+} from "../services/codex-auth-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
 import * as messageService from "../services/task-message-service.js";
@@ -646,6 +649,13 @@ export function startTaskWorker() {
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
+        if (task.agentType === "codex" && codexAuthMode === "app-server") {
+          allEnv.OPTIO_CODEX_AUTH_JSON_B64 =
+            typeof codexAuthJson === "string" && codexAuthJson.length > 0
+              ? Buffer.from(codexAuthJson, "utf8").toString("base64")
+              : "";
+        }
+
         // Resolve git platform tokens (not part of adapter requiredSecrets since they're infra-level)
         for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
           if (!allEnv[secretName]) {
@@ -761,12 +771,6 @@ export function startTaskWorker() {
             : {}),
           ...(allEnv.OPTIO_SETUP_COMMANDS
             ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-          ...(task.agentType === "codex" &&
-          codexAuthMode === "app-server" &&
-          typeof codexAuthJson === "string" &&
-          codexAuthJson.length > 0
-            ? { OPTIO_CODEX_AUTH_JSON_B64: Buffer.from(codexAuthJson, "utf8").toString("base64") }
             : {}),
         };
 
@@ -1092,6 +1096,11 @@ export function startTaskWorker() {
         // Exec finished — determine result
         if (stderrData) {
           log.warn({ stderrPreview: stderrData.slice(0, 500) }, "Exec stderr output");
+        }
+        if (task.agentType === "codex" && codexAuthMode === "app-server") {
+          await syncCodexAuthFromRepoPod({
+            handle: { id: pod.podId ?? pod.podName!, name: pod.podName! },
+          }).catch((err) => log.warn({ err }, "Failed to sync refreshed Codex auth from repo pod"));
         }
         // Before processing results, verify this worker still owns the task.
         // A force-redo may have reset the task while we were streaming.
@@ -1896,7 +1905,11 @@ export function buildAgentCommand(
       const appServerMode = env.OPTIO_CODEX_AUTH_MODE === "app-server";
       const codexSetup =
         env.OPTIO_CODEX_AUTH_MODE === "app-server"
-          ? []
+          ? [
+              `mkdir -p "/home/agent/.codex"`,
+              `chmod 700 "/home/agent/.codex"`,
+              `if [ -n "${"$"}{OPTIO_CODEX_AUTH_JSON_B64:-}" ]; then printf '%s' "$OPTIO_CODEX_AUTH_JSON_B64" | base64 -d > "/home/agent/.codex/auth.json"; chmod 600 "/home/agent/.codex/auth.json"; fi`,
+            ]
           : [
               `export CODEX_HOME="/home/agent/.optio-codex/${env.OPTIO_TASK_ID ?? "task"}"`,
               `rm -rf "$CODEX_HOME"`,
