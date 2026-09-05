@@ -631,6 +631,23 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
+      {/* The task prompt can be long, so keep it available without taking over the detail view. */}
+      {task.prompt && (
+        <div className="shrink-0 border-b border-border bg-bg px-4 py-2.5">
+          <details className="max-w-5xl mx-auto group">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-medium text-text-muted hover:text-text">
+              <span className="transition-transform group-open:rotate-90" aria-hidden="true">
+                ▸
+              </span>
+              Initial Prompt
+            </summary>
+            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-card p-3 text-xs text-text-muted">
+              {task.prompt}
+            </pre>
+          </details>
+        </div>
+      )}
+
       {/* Dependencies */}
       <div className="shrink-0 border-b border-border bg-bg px-4 py-2.5">
         <div className="max-w-5xl mx-auto">
