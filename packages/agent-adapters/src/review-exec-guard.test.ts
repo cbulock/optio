@@ -36,11 +36,13 @@ describe("Codex review execution guard", () => {
 
   it("keeps canonical /usr/bin git and gh paths guarded for review descendants", () => {
     const image = readFileSync(dockerfile, "utf8");
+    expect(image).toContain("mv /usr/bin/git /opt/optio/git");
+    expect(image).not.toContain("mv /usr/bin/git /opt/optio/git-real");
     expect(image).toContain("ln -s /opt/optio/review-guard-git /usr/bin/git");
     expect(image).toContain("ln -s /opt/optio/review-guard-gh /usr/bin/gh");
     expect(readFileSync(ghWrapper, "utf8")).toContain('"${2:-}" != "review"');
     expect(readFileSync(ghWrapper, "utf8")).toContain("exec /opt/optio/gh-real");
-    expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git-real");
+    expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git");
   });
 
   it("permits the minimal GitHub review submission command", () => {

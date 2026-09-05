@@ -32,7 +32,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Keep the command boundaries at the canonical absolute paths. The guard is
 # inactive for normal coding tasks and for pod setup; it activates only in the
 # Codex review app-server child environment.
-RUN mv /usr/bin/git /opt/optio/git-real \
+RUN mv /usr/bin/git /opt/optio/git \
     && mv /usr/bin/gh /opt/optio/gh-real \
     && chmod 755 /opt/optio/review-guard-git /opt/optio/review-guard-gh \
     && ln -s /opt/optio/review-guard-git /usr/bin/git \
