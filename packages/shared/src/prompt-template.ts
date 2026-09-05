@@ -203,8 +203,10 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
    - If changes are needed: post a comment with \`aws codecommit post-comment-for-pull-request ...\` whose content starts with \`**[CHANGES REQUESTED]**\`
 {{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
    - If changes are needed: \`glab mr note {{PR_NUMBER}} --message "Changes requested: What needs fixing"\`
-{{else}}   - If the code is good: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
-   - If changes are needed: \`gh pr review {{PR_NUMBER}} --request-changes --body "What needs fixing"\`
+{{else}}   - If the code is good and you are NOT the PR author: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
+   - If the code is good and you ARE the PR author: \`gh pr comment {{PR_NUMBER}} --body "Review summary: Your review summary"\`. Do NOT approve your own PR.
+   - If changes are needed and you are NOT the PR author: \`gh pr review {{PR_NUMBER}} --request-changes --body "What needs fixing"\`
+   - If changes are needed and you ARE the PR author: \`gh pr comment {{PR_NUMBER}} --body "Changes requested: What needs fixing"\`. GitHub does not allow authors to request changes on their own PR. Still print \`OPTIO_REVIEW_VERDICT: request_changes\` before exiting so Optio records the internal changes-requested status and resumes the implementation task.
 {{/if}}{{/if}}
 
 6. After submitting your review, you are done. Do not review any other {{#if GIT_PLATFORM_GITLAB}}MRs{{else}}PRs{{/if}}.
@@ -225,7 +227,8 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 - Your job is to READ the diff and submit a review. That's it.
 - Only request changes for real issues, not style nitpicks.
 - Be specific about what needs fixing and why.
-- If the code correctly implements the task, approve it.
+- If the code correctly implements the task and you are not the PR author, approve it.
+- If you are the PR author, never attempt to approve or request changes on your own PR; leave a comment instead and always emit the appropriate \`OPTIO_REVIEW_VERDICT\`.
 `;
 
 export const REVIEW_TASK_FILE_PATH = ".optio/review-context.md";
