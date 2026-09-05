@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_REVIEW_PROMPT_TEMPLATE,
   renderPromptTemplate,
   renderTaskFile,
   TASK_FILE_PATH,
@@ -266,6 +267,23 @@ describe("CodeCommit branch in DEFAULT_PROMPT_TEMPLATE", () => {
     expect(result).toContain("gh pr create");
     expect(result).not.toContain("aws codecommit");
     expect(result).not.toContain("glab mr create");
+  });
+});
+
+describe("DEFAULT_REVIEW_PROMPT_TEMPLATE", () => {
+  it("uses a comment and durable verdict fallback when reviewing the author's own GitHub PR", () => {
+    const result = renderPromptTemplate(DEFAULT_REVIEW_PROMPT_TEMPLATE, {
+      PR_NUMBER: "42",
+      TASK_FILE: ".optio/review-context.md",
+      BASE_BRANCH: "main",
+      GIT_PLATFORM_GITLAB: "",
+      GIT_PLATFORM_CODECOMMIT: "",
+    });
+
+    expect(result).toContain("If changes are needed and you ARE the PR author");
+    expect(result).toContain('gh pr comment 42 --body "Changes requested: What needs fixing"');
+    expect(result).toContain("OPTIO_REVIEW_VERDICT: request_changes");
+    expect(result).toContain("never attempt to approve or request changes on your own PR");
   });
 });
 
