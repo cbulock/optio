@@ -7,6 +7,29 @@ export interface ReviewTaskOverride {
   claudeModel?: string;
 }
 
+export type ReviewTaskVerdict = "approve" | "request_changes" | "comment";
+
+/**
+ * Review agents emit this marker after publishing their GitHub review.  It is
+ * intentionally independent of GitHub's review state: an author reviewing
+ * their own PR must submit a COMMENTED review even when changes are required.
+ */
+export function parseReviewTaskVerdict(output: string): ReviewTaskVerdict | null {
+  const matches = [
+    ...output.matchAll(/^OPTIO_REVIEW_VERDICT:\s*(approve|request_changes|comment)\s*$/gim),
+  ];
+  return (matches.at(-1)?.[1] as ReviewTaskVerdict | undefined) ?? null;
+}
+
+export function getStoredReviewTaskVerdict(
+  metadata: Record<string, unknown> | null,
+): ReviewTaskVerdict | null {
+  const verdict = metadata?.reviewVerdict;
+  return verdict === "approve" || verdict === "request_changes" || verdict === "comment"
+    ? verdict
+    : null;
+}
+
 /**
  * BullMQ jobs are disposable. A retry must recover its dedicated review
  * prompt/context from durable task metadata instead of accidentally running a
