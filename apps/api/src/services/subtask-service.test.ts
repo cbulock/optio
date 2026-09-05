@@ -504,7 +504,14 @@ describe("subtask-service", () => {
             }
             if (selectCallCount === 2) {
               // review subtasks query
-              return Promise.resolve([{ id: "review-1", state: "completed", taskType: "review" }]);
+              return Promise.resolve([
+                {
+                  id: "review-1",
+                  state: "completed",
+                  taskType: "review",
+                  metadata: { reviewVerdict: "approve" },
+                },
+              ]);
             }
             if (selectCallCount === 3) {
               // getDefaultWorkspaceId — no default workspace in test

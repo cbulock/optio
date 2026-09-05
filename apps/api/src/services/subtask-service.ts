@@ -5,6 +5,7 @@ import { TaskState } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
+import { getStoredReviewTaskVerdict } from "./review-task-input.js";
 
 export interface SubtaskInput {
   parentTaskId: string;
@@ -176,13 +177,58 @@ export async function onSubtaskComplete(subtaskId: string) {
 
   // All blocking subtasks are done — check if parent should auto-advance
   if (parent.state === "pr_opened") {
-    // Check if review approved
+    // A review agent's durable verdict is authoritative. GitHub may force an
+    // author reviewing their own PR to publish COMMENTED instead of
+    // CHANGES_REQUESTED, so platform state alone cannot drive this loop.
     const reviewSubtasks = await db
       .select()
       .from(tasks)
       .where(and(eq(tasks.parentTaskId, parent.id), eq(tasks.taskType, "review")));
 
-    const anyApproved = reviewSubtasks.some((r) => r.state === "completed");
+    const changeRequest = reviewSubtasks.find(
+      (r) =>
+        r.state === "completed" && getStoredReviewTaskVerdict(r.metadata) === "request_changes",
+    );
+
+    if (changeRequest) {
+      const feedback =
+        changeRequest.resultSummary ??
+        "Review requested changes; inspect the submitted review for details.";
+      await db
+        .update(tasks)
+        .set({
+          prReviewStatus: "changes_requested",
+          prReviewComments: feedback,
+          updatedAt: new Date(),
+        })
+        .where(eq(tasks.id, parent.id));
+
+      const { buildWorldSnapshot } = await import("./reconcile-snapshot.js");
+      const { executeAction } = await import("./reconcile-executor.js");
+      const snapshot = await buildWorldSnapshot({ kind: "repo", id: parent.id });
+      if (
+        snapshot?.run.kind === "repo" &&
+        snapshot.settings.autoResume &&
+        snapshot.settings.recentAutoResumeCount < snapshot.settings.maxAutoResumes
+      ) {
+        await executeAction(
+          { kind: "resumeAgent", resumeReason: "review", reason: "optio_review_request_changes" },
+          snapshot,
+        );
+      } else {
+        await taskService.transitionTask(
+          parent.id,
+          TaskState.NEEDS_ATTENTION,
+          "review_changes_requested",
+          feedback.slice(0, 200),
+        );
+      }
+      return;
+    }
+
+    const anyApproved = reviewSubtasks.some(
+      (r) => r.state === "completed" && getStoredReviewTaskVerdict(r.metadata) === "approve",
+    );
 
     if (anyApproved && parent.prUrl) {
       logger.info({ taskId: parent.id }, "All blocking subtasks complete, review approved");

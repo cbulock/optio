@@ -209,6 +209,13 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 
 6. After submitting your review, you are done. Do not review any other {{#if GIT_PLATFORM_GITLAB}}MRs{{else}}PRs{{/if}}.
 
+7. Before exiting, print one exact machine-readable line recording your conclusion:
+   OPTIO_REVIEW_VERDICT: approve
+   OPTIO_REVIEW_VERDICT: request_changes
+   OPTIO_REVIEW_VERDICT: comment
+   Use \`request_changes\` when fixes are required even if GitHub forces you to
+   submit a COMMENTED review because you are reviewing your own PR.
+
 ## Guidelines
 
 - Review ONLY {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}. Nothing else.

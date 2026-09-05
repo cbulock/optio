@@ -63,7 +63,11 @@ import {
 import { emitCostReportLog } from "../telemetry/logs.js";
 import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
-import { resolveReviewTaskInput, type ReviewTaskOverride } from "../services/review-task-input.js";
+import {
+  parseReviewTaskVerdict,
+  resolveReviewTaskInput,
+  type ReviewTaskOverride,
+} from "../services/review-task-input.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -1291,6 +1295,22 @@ export function startTaskWorker() {
           sessionId,
           detectedPrUrl,
         });
+
+        // GitHub prevents a PR author from formally requesting changes on
+        // their own PR. Persist the review agent's explicit verdict so the
+        // parent can still enter the normal feedback/resume loop.
+        if (isReviewTask) {
+          const reviewVerdict = parseReviewTaskVerdict(allLogs);
+          if (reviewVerdict) {
+            await db
+              .update(tasks)
+              .set({
+                metadata: { ...(task.metadata ?? {}), reviewVerdict },
+                updatedAt: new Date(),
+              })
+              .where(eq(tasks.id, taskId));
+          }
+        }
 
         if (outcome === "no_output") {
           // Agent never started — no output was produced at all.
