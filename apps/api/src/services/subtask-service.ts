@@ -170,10 +170,14 @@ export async function onSubtaskComplete(subtaskId: string) {
   }
 
   const status = await checkBlockingSubtasks(subtask.parentTaskId);
-  if (!status.allComplete) return;
-
   const parent = await taskService.getTask(subtask.parentTaskId);
   if (!parent) return;
+
+  // A completed review verdict is authoritative even when an older review
+  // attempt failed. Retrying a review must not leave its coding parent stuck
+  // forever in `pr_opened` merely because that historical failure remains a
+  // blocking subtask.
+  if (!status.allComplete && subtask.taskType !== "review") return;
 
   // All blocking subtasks are done — check if parent should auto-advance
   if (parent.state === "pr_opened") {
