@@ -98,7 +98,7 @@ describe("resolveEffectiveReviewStatus", () => {
     expect(resolveEffectiveReviewStatus("changes_requested", "none")).toBe("changes_requested");
   });
 
-  it("accepts a later substantive platform review", () => {
+  it("accepts a substantive platform approval after Optio requested changes", () => {
     expect(resolveEffectiveReviewStatus("changes_requested", "approved")).toBe("approved");
     expect(resolveEffectiveReviewStatus("changes_requested", "changes_requested")).toBe(
       "changes_requested",
@@ -108,17 +108,15 @@ describe("resolveEffectiveReviewStatus", () => {
   it("preserves Optio approval verdicts when an author's review is a comment", () => {
     expect(resolveEffectiveReviewStatus("approved", "pending")).toBe("approved");
     expect(resolveEffectiveReviewStatus("approved", "none")).toBe("approved");
-    expect(resolveEffectiveReviewStatus("approved", "changes_requested")).toBe(
-      "changes_requested",
-    );
+    expect(resolveEffectiveReviewStatus("approved", "changes_requested")).toBe("approved");
   });
 });
 
 describe("shouldPreserveInternalReviewVerdict", () => {
-  it("uses atomic preservation only for non-substantive platform results", () => {
-    expect(shouldPreserveInternalReviewVerdict("pending")).toBe(true);
-    expect(shouldPreserveInternalReviewVerdict("none")).toBe(true);
-    expect(shouldPreserveInternalReviewVerdict("approved")).toBe(false);
-    expect(shouldPreserveInternalReviewVerdict("changes_requested")).toBe(false);
+  it("preserves a durable Optio approval over historical platform feedback", () => {
+    expect(shouldPreserveInternalReviewVerdict(null, "pending")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict(null, "none")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict("approved", "changes_requested")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict(null, "changes_requested")).toBe(false);
   });
 });
