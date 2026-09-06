@@ -1127,6 +1127,19 @@ export function startTaskWorker() {
         const inferredExitCode = inferExitCode(task.agentType, allLogs);
         const result = adapter.parseResult(inferredExitCode, allLogs);
 
+        // A review verdict is emitted only after the agent has submitted its
+        // review. It is the durable internal outcome for same-author reviews,
+        // where GitHub cannot represent request-changes directly. Do not let a
+        // recoverable earlier tool error (for example, a guarded read probe)
+        // discard that completed review.
+        const reviewVerdict = isReviewTask ? parseReviewTaskVerdict(allLogs) : null;
+        if (reviewVerdict && !result.success) {
+          result.success = true;
+          result.error = undefined;
+          result.summary = `Review completed with ${reviewVerdict} verdict`;
+          log.info({ reviewVerdict }, "Review verdict overrides recoverable agent error");
+        }
+
         // Override a nominally-successful result if the agent emitted an auth
         // failure mid-run. Many agent CLIs catch 401s internally and exit 0,
         // which would otherwise mark the task as completed despite no useful
@@ -1300,7 +1313,6 @@ export function startTaskWorker() {
         // their own PR. Persist the review agent's explicit verdict so the
         // parent can still enter the normal feedback/resume loop.
         if (isReviewTask) {
-          const reviewVerdict = parseReviewTaskVerdict(allLogs);
           if (reviewVerdict) {
             await db
               .update(tasks)

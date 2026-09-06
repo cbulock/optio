@@ -15,8 +15,12 @@ export type ReviewTaskVerdict = "approve" | "request_changes" | "comment";
  * their own PR must submit a COMMENTED review even when changes are required.
  */
 export function parseReviewTaskVerdict(output: string): ReviewTaskVerdict | null {
+  // App-server streaming can split the marker across many text deltas. Remove
+  // whitespace only for marker recognition so the review's explicit verdict
+  // survives those transport boundaries without inferring prose as a verdict.
+  const compactOutput = output.replace(/\s+/g, "");
   const matches = [
-    ...output.matchAll(/^OPTIO_REVIEW_VERDICT:\s*(approve|request_changes|comment)\s*$/gim),
+    ...compactOutput.matchAll(/OPTIO_REVIEW_VERDICT:(approve|request_changes|comment)/gi),
   ];
   return (matches.at(-1)?.[1] as ReviewTaskVerdict | undefined) ?? null;
 }

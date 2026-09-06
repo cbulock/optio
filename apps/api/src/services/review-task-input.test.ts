@@ -33,6 +33,12 @@ describe("parseReviewTaskVerdict", () => {
     ).toBe("request_changes");
   });
 
+  it("recognizes a verdict split across app-server streaming chunks", () => {
+    expect(
+      parseReviewTaskVerdict("Review complete\nOPT\nIO_RE\nVIEW_VER\nDICT: request\n_changes\n"),
+    ).toBe("request_changes");
+  });
+
   it("does not infer a verdict from ordinary review prose", () => {
     expect(parseReviewTaskVerdict("I would request changes, but GitHub rejected it.")).toBeNull();
   });

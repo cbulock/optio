@@ -63,6 +63,17 @@ static void deny(const char *operation, const char *target) {
 static bool git_read_only(char *const argv[]) {
   const char *sub = argv[1];
   if (!sub) return true;
+  if (strcmp(sub, "config") == 0) {
+    return argv[2] &&
+      (strcmp(argv[2], "--get") == 0 || strcmp(argv[2], "--get-all") == 0 ||
+       strcmp(argv[2], "--get-regexp") == 0 || strcmp(argv[2], "--list") == 0 ||
+       strcmp(argv[2], "--show-origin") == 0);
+  }
+  if (strcmp(sub, "remote") == 0) {
+    return argv[2] &&
+      (strcmp(argv[2], "-v") == 0 || strcmp(argv[2], "--verbose") == 0 ||
+       strcmp(argv[2], "get-url") == 0);
+  }
   return strcmp(sub, "diff") == 0 || strcmp(sub, "show") == 0 ||
     strcmp(sub, "status") == 0 || strcmp(sub, "log") == 0 ||
     strcmp(sub, "rev-parse") == 0 || strcmp(sub, "ls-files") == 0 ||

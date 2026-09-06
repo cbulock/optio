@@ -44,6 +44,8 @@ describe("Codex review execution guard", () => {
     expect(readFileSync(ghWrapper, "utf8")).toContain('"${2:-}" != "comment"');
     expect(readFileSync(ghWrapper, "utf8")).toContain("exec /opt/optio/gh-real");
     expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git");
+    expect(readFileSync(gitWrapper, "utf8")).toContain("--get-regexp");
+    expect(readFileSync(gitWrapper, "utf8")).toContain("get-url");
   });
 
   it("permits only GitHub PR review submission and comment commands", () => {
@@ -75,6 +77,32 @@ describe("Codex review execution guard", () => {
     expect(
       spawnSync("/bin/sh", ["-c", `${fakeGh} issue comment 22 --body \"not allowed\"`], { env })
         .status,
+    ).not.toBe(0);
+  });
+
+  it("permits Git metadata reads but rejects Git configuration and remote writes", () => {
+    const temp = mkdtempSync(`${tmpdir()}/optio-review-guard-git-`);
+    cleanup.push(temp);
+    const library = `${temp}/guard.so`;
+    const fakeGit = `${temp}/git`;
+    execFileSync("gcc", ["-shared", "-fPIC", "-O2", "-o", library, source, "-ldl"]);
+    execFileSync("sh", [
+      "-c",
+      `printf '%s\\n' '#!/bin/sh' 'exit 0' > ${fakeGit} && chmod 755 ${fakeGit}`,
+    ]);
+
+    const env = { ...process.env, LD_PRELOAD: library };
+    expect(spawnSync("/bin/sh", ["-c", `${fakeGit} remote -v`], { env }).status).toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGit} config --get remote.origin.url`], { env }).status,
+    ).toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGit} remote set-url origin https://example.com/repo`], {
+        env,
+      }).status,
+    ).not.toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGit} config user.name mutation`], { env }).status,
     ).not.toBe(0);
   });
 });
