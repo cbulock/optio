@@ -50,15 +50,18 @@ export function determineReviewStatus(reviews: { state: string; body?: string }[
 
 /**
  * GitHub reports a same-author review as COMMENTED even when Optio's review
- * agent has a durable decision. Keep that internal verdict until GitHub
- * supplies a substantive approval or request-changes review.
+ * agent has a durable decision. A completed self-review is newer and more
+ * specific than historical platform feedback, so preserve its approval.
  */
 export function resolveEffectiveReviewStatus(
   storedStatus: string | null,
   platformStatus: string,
 ): string {
+  if (storedStatus === "approved") {
+    return storedStatus;
+  }
   if (
-    (storedStatus === "changes_requested" || storedStatus === "approved") &&
+    storedStatus === "changes_requested" &&
     (platformStatus === "pending" || platformStatus === "none")
   ) {
     return storedStatus;
@@ -66,8 +69,11 @@ export function resolveEffectiveReviewStatus(
   return platformStatus;
 }
 
-export function shouldPreserveInternalReviewVerdict(platformStatus: string): boolean {
-  return platformStatus === "pending" || platformStatus === "none";
+export function shouldPreserveInternalReviewVerdict(
+  storedStatus: string | null,
+  platformStatus: string,
+): boolean {
+  return storedStatus === "approved" || platformStatus === "pending" || platformStatus === "none";
 }
 
 export const prWatcherQueue = new Queue("pr-watcher", { connection: connectionOpts });
@@ -179,7 +185,10 @@ export function startPrWatcherWorker() {
             // Reading the cached status alone would then overwrite the new
             // durable self-review verdict with GitHub's COMMENTED/pending
             // representation.
-            prReviewStatus: shouldPreserveInternalReviewVerdict(reviewResult.status)
+            prReviewStatus: shouldPreserveInternalReviewVerdict(
+              task.prReviewStatus,
+              reviewResult.status,
+            )
               ? sql`CASE WHEN ${tasks.prReviewStatus} IN ('changes_requested', 'approved') THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
               : reviewStatus,
             updatedAt: new Date(),
