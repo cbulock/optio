@@ -284,6 +284,8 @@ describe("DEFAULT_REVIEW_PROMPT_TEMPLATE", () => {
     expect(result).toContain('gh pr comment 42 --body "Changes requested: What needs fixing"');
     expect(result).toContain("OPTIO_REVIEW_VERDICT: request_changes");
     expect(result).toContain("never attempt to approve or request changes on your own PR");
+    expect(result).toContain("Treat existing review comments in the task context as historical evidence");
+    expect(result).toContain("the current PR diff and head files");
   });
 });
 
