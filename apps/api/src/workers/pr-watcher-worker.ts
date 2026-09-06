@@ -177,18 +177,11 @@ export function startPrWatcherWorker() {
             prNumber,
             prState: prData.merged ? "merged" : prData.state,
             prChecksStatus: effectiveChecksStatus,
-            // Evaluate this against the row at write time. A review can finish
-            // after this watcher read `task` but before its update commits.
-            // Reading the cached status alone would then overwrite the new
-            // durable self-review verdict with GitHub's COMMENTED/pending
-            // representation.
-            prReviewStatus: shouldPreserveInternalReviewVerdict(reviewResult.status)
-              ? sql`CASE WHEN ${tasks.prReviewStatus} IN ('changes_requested', 'approved') THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
-              // This must still be evaluated in SQL. The watcher may have
-              // read `pending` immediately before a self-review persisted
-              // `approved`; assigning the stale platform value directly
-              // would otherwise undo that completion.
-              : sql`CASE WHEN ${tasks.prReviewStatus} = 'approved' THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`,
+            // A completed Optio review is the durable outcome for this task.
+            // GitHub represents same-author reviews as comments, so its
+            // aggregate state cannot safely replace either internal verdict.
+            // Evaluate against the row at write time to close completion races.
+            prReviewStatus: sql`CASE WHEN ${tasks.prReviewStatus} IN ('changes_requested', 'approved') THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`,
             updatedAt: new Date(),
           };
           if (reviewComments) {
