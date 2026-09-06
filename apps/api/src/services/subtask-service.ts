@@ -189,14 +189,17 @@ export async function onSubtaskComplete(subtaskId: string) {
       .from(tasks)
       .where(and(eq(tasks.parentTaskId, parent.id), eq(tasks.taskType, "review")));
 
-    const changeRequest = reviewSubtasks.find(
-      (r) =>
-        r.state === "completed" && getStoredReviewTaskVerdict(r.metadata) === "request_changes",
-    );
+    // A rerun supersedes older review attempts. A reviewer can resolve a
+    // prior request for changes, so an older verdict must not keep the parent
+    // stuck after a newer review concludes.
+    const latestReview = reviewSubtasks
+      .filter((r) => r.state === "completed" && getStoredReviewTaskVerdict(r.metadata))
+      .sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))[0];
+    const latestVerdict = latestReview && getStoredReviewTaskVerdict(latestReview.metadata);
 
-    if (changeRequest) {
+    if (latestVerdict === "request_changes") {
       const feedback =
-        changeRequest.resultSummary ??
+        latestReview?.resultSummary ??
         "Review requested changes; inspect the submitted review for details.";
       await db
         .update(tasks)
@@ -230,9 +233,17 @@ export async function onSubtaskComplete(subtaskId: string) {
       return;
     }
 
-    const anyApproved = reviewSubtasks.some(
-      (r) => r.state === "completed" && getStoredReviewTaskVerdict(r.metadata) === "approve",
-    );
+    // GitHub does not permit a PR author to formally approve their own PR, so
+    // a successful same-author review is stored as the durable `comment`
+    // verdict.
+    const anyApproved = latestVerdict === "approve" || latestVerdict === "comment";
+
+    if (anyApproved) {
+      await db
+        .update(tasks)
+        .set({ prReviewStatus: "approved", prReviewComments: null, updatedAt: new Date() })
+        .where(eq(tasks.id, parent.id));
+    }
 
     if (anyApproved && parent.prUrl) {
       logger.info({ taskId: parent.id }, "All blocking subtasks complete, review approved");

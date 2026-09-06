@@ -50,15 +50,15 @@ export function determineReviewStatus(reviews: { state: string; body?: string }[
 
 /**
  * GitHub reports a same-author review as COMMENTED even when Optio's review
- * agent explicitly requested changes. Keep that durable internal verdict
- * until GitHub supplies a substantive approval or request-changes review.
+ * agent has a durable decision. Keep that internal verdict until GitHub
+ * supplies a substantive approval or request-changes review.
  */
 export function resolveEffectiveReviewStatus(
   storedStatus: string | null,
   platformStatus: string,
 ): string {
   if (
-    storedStatus === "changes_requested" &&
+    (storedStatus === "changes_requested" || storedStatus === "approved") &&
     (platformStatus === "pending" || platformStatus === "none")
   ) {
     return storedStatus;
@@ -66,7 +66,7 @@ export function resolveEffectiveReviewStatus(
   return platformStatus;
 }
 
-export function shouldPreserveInternalChangesRequested(platformStatus: string): boolean {
+export function shouldPreserveInternalReviewVerdict(platformStatus: string): boolean {
   return platformStatus === "pending" || platformStatus === "none";
 }
 
@@ -179,8 +179,8 @@ export function startPrWatcherWorker() {
             // Reading the cached status alone would then overwrite the new
             // durable self-review verdict with GitHub's COMMENTED/pending
             // representation.
-            prReviewStatus: shouldPreserveInternalChangesRequested(reviewResult.status)
-              ? sql`CASE WHEN ${tasks.prReviewStatus} = 'changes_requested' THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
+            prReviewStatus: shouldPreserveInternalReviewVerdict(reviewResult.status)
+              ? sql`CASE WHEN ${tasks.prReviewStatus} IN ('changes_requested', 'approved') THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
               : reviewStatus,
             updatedAt: new Date(),
           };
