@@ -15,10 +15,15 @@ export type ReviewTaskVerdict = "approve" | "request_changes" | "comment";
  * their own PR must submit a COMMENTED review even when changes are required.
  */
 export function parseReviewTaskVerdict(output: string): ReviewTaskVerdict | null {
+  // `allLogs` is the raw Codex NDJSON stream, not the rendered task log. A
+  // marker can therefore be split across separate JSON message events. Join
+  // assistant text content before looking for the explicit marker; removing
+  // whitespace from the raw NDJSON alone leaves JSON syntax between chunks.
+  const assistantText = extractCodexAssistantText(output);
   // App-server streaming can split the marker across many text deltas. Remove
   // whitespace only for marker recognition so the review's explicit verdict
   // survives those transport boundaries without inferring prose as a verdict.
-  const compactOutput = output.replace(/\s+/g, "");
+  const compactOutput = `${output}\n${assistantText}`.replace(/\s+/g, "");
   const matches = [
     ...compactOutput.matchAll(/OPTIO_REVIEW_VERDICT:(approve|request_changes|comment)/gi),
   ];
@@ -34,6 +39,34 @@ export function parseReviewTaskVerdict(output: string): ReviewTaskVerdict | null
   }
 
   return null;
+}
+
+function extractCodexAssistantText(output: string): string {
+  const chunks: string[] = [];
+  for (const line of output.split("\n")) {
+    try {
+      const event = JSON.parse(line) as { type?: string; role?: string; content?: unknown };
+      if (event.type !== "message" || event.role !== "assistant") continue;
+      if (typeof event.content === "string") {
+        chunks.push(event.content);
+      } else if (Array.isArray(event.content)) {
+        for (const block of event.content) {
+          if (typeof block === "string") chunks.push(block);
+          else if (
+            block &&
+            typeof block === "object" &&
+            (block as { type?: unknown }).type === "text" &&
+            typeof (block as { text?: unknown }).text === "string"
+          ) {
+            chunks.push((block as { text: string }).text);
+          }
+        }
+      }
+    } catch {
+      // Non-JSON output is still covered by the raw-output fallback above.
+    }
+  }
+  return chunks.join("");
 }
 
 export function getStoredReviewTaskVerdict(

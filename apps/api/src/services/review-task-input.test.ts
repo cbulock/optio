@@ -39,6 +39,23 @@ describe("parseReviewTaskVerdict", () => {
     ).toBe("request_changes");
   });
 
+  it("recognizes a verdict split across Codex NDJSON message events", () => {
+    const event = (content: string) =>
+      JSON.stringify({ type: "message", role: "assistant", content });
+    expect(
+      parseReviewTaskVerdict(
+        [
+          event("Submitted a changes"),
+          event("\n\nOPT"),
+          event("IO_RE"),
+          event("VIEW_VER"),
+          event("DICT: request"),
+          event("_changes"),
+        ].join("\n"),
+      ),
+    ).toBe("request_changes");
+  });
+
   it("recognizes a completed same-author fallback comment", () => {
     expect(
       parseReviewTaskVerdict(
