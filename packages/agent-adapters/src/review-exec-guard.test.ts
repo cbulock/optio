@@ -44,6 +44,7 @@ describe("Codex review execution guard", () => {
     expect(readFileSync(ghWrapper, "utf8")).toContain('[ "${2:-}" = "comment" ]');
     expect(readFileSync(ghWrapper, "utf8")).toContain('[ "${1:-}" = "api" ] && {');
     expect(readFileSync(ghWrapper, "utf8")).toContain('repos/*');
+    expect(readFileSync(ghWrapper, "utf8")).toContain('--paginate|--slurp');
     expect(readFileSync(ghWrapper, "utf8")).toContain("exec /opt/optio/gh-real");
     expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git");
     expect(readFileSync(gitWrapper, "utf8")).toContain("--get-regexp");
@@ -92,10 +93,16 @@ describe("Codex review execution guard", () => {
       spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio/contents/src/cloud/CloudApp.tsx?ref=abc`], { env }).status,
     ).toBe(0);
     expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio/pulls/22/files --paginate --slurp --jq '.[]'`], { env }).status,
+    ).toBe(0);
+    expect(
       spawnSync("/bin/sh", ["-c", `${fakeGh} api user --method POST`], { env }).status,
     ).not.toBe(0);
     expect(
       spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio --method POST`], { env }).status,
+    ).not.toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio --paginate --method GET`], { env }).status,
     ).not.toBe(0);
   });
 

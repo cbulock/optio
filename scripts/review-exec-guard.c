@@ -90,12 +90,18 @@ static bool gh_review_only(char *const argv[]) {
       strcmp(argv[2], "review") == 0 || strcmp(argv[2], "comment") == 0;
   }
   // Identity and repository-content reads let a reviewer establish authorship
-  // and inspect a PR without opening arbitrary GitHub API access. Accept only
-  // the endpoint and an optional jq selector; fields/methods would permit
-  // writes because gh switches to POST when request fields are supplied.
+  // and inspect a PR without opening arbitrary GitHub API access. `--paginate`
+  // and `--slurp` only alter how a GET response is returned, and `--jq` only
+  // filters it. Fields/methods remain forbidden because gh switches to POST
+  // when request fields are supplied.
   if (strcmp(argv[1], "api") != 0 ||
       (strcmp(argv[2], "user") != 0 && !starts_with(argv[2], "repos/"))) return false;
-  return !argv[3] || (strcmp(argv[3], "--jq") == 0 && argv[4] && !argv[5]);
+  for (size_t i = 3; argv[i]; i++) {
+    if (strcmp(argv[i], "--paginate") == 0 || strcmp(argv[i], "--slurp") == 0) continue;
+    if (strcmp(argv[i], "--jq") == 0 && argv[i + 1]) { i++; continue; }
+    return false;
+  }
+  return true;
 }
 
 static bool is_package_mutation(const char *cmd, char *const argv[]) {
