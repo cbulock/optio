@@ -12,6 +12,7 @@ import { logger } from "../logger.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
 import { recordPrWatchCycleDuration } from "../telemetry/metrics.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
+import { getStoredReviewTaskVerdict } from "../services/review-task-input.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -56,7 +57,17 @@ export function determineReviewStatus(reviews: { state: string; body?: string }[
 export function resolveEffectiveReviewStatus(
   storedStatus: string | null,
   platformStatus: string,
+  latestInternalVerdict: "approve" | "request_changes" | "comment" | null = null,
 ): string {
+  // Internal review tasks are the only reliable source for a same-author
+  // decision: GitHub stores those as COMMENTED, which is otherwise
+  // indistinguishable from an in-progress review. Re-derive this from the
+  // completed child task rather than relying solely on the parent field,
+  // because the parent can be reset while an auto-resume is being queued.
+  if (latestInternalVerdict === "request_changes") return "changes_requested";
+  if (latestInternalVerdict === "approve" || latestInternalVerdict === "comment") {
+    return "approved";
+  }
   if (storedStatus === "approved") {
     return storedStatus;
   }
@@ -145,9 +156,35 @@ export function startPrWatcherWorker() {
           const reviewsData = await platform.getReviews(ri, prNumber).catch(() => []);
           const checksStatus = determineCheckStatus(checkRuns);
           const reviewResult = determineReviewStatus(reviewsData);
+          const completedReviewSubtasks = await db
+            .select({
+              metadata: tasks.metadata,
+              updatedAt: tasks.updatedAt,
+              completedAt: tasks.completedAt,
+            })
+            .from(tasks)
+            .where(
+              sql`${tasks.parentTaskId} = ${task.id} AND ${tasks.taskType} = 'review' AND ${tasks.state} = 'completed'`,
+            );
+          const latestInternalVerdict =
+            completedReviewSubtasks
+              .map((review) => ({
+                verdict: getStoredReviewTaskVerdict(review.metadata),
+                updatedAt: review.updatedAt ?? review.completedAt ?? new Date(0),
+              }))
+              .filter(
+                (
+                  review,
+                ): review is {
+                  verdict: "approve" | "request_changes" | "comment";
+                  updatedAt: Date;
+                } => review.verdict !== null,
+              )
+              .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0]?.verdict ?? null;
           const reviewStatus = resolveEffectiveReviewStatus(
             task.prReviewStatus,
             reviewResult.status,
+            latestInternalVerdict,
           );
           let reviewComments = reviewResult.comments;
 
