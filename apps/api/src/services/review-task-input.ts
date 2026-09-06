@@ -22,7 +22,18 @@ export function parseReviewTaskVerdict(output: string): ReviewTaskVerdict | null
   const matches = [
     ...compactOutput.matchAll(/OPTIO_REVIEW_VERDICT:(approve|request_changes|comment)/gi),
   ];
-  return (matches.at(-1)?.[1] as ReviewTaskVerdict | undefined) ?? null;
+  const explicitVerdict = matches.at(-1)?.[1] as ReviewTaskVerdict | undefined;
+  if (explicitVerdict) return explicitVerdict;
+
+  // A same-author review can recover from a rejected `gh pr comment` by
+  // posting through GitHub's API. That completed fallback is an unambiguous
+  // internal request-changes outcome even if the agent's subsequent marker is
+  // lost with the failed shell command's turn result.
+  if (/Submitted a changes-requested comment on PR #\d+/i.test(output)) {
+    return "request_changes";
+  }
+
+  return null;
 }
 
 export function getStoredReviewTaskVerdict(

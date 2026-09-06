@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
-import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -113,7 +111,6 @@ let daemon = null;
 let daemonStderr = "";
 let daemonStdout = "";
 let cleaningUp = false;
-let reviewGuardDir = null;
 const REVIEW_EXEC_GUARD = "/opt/optio/review-exec-guard.so";
 
 process.on("SIGINT", () => void cleanup(130));
@@ -121,7 +118,7 @@ process.on("SIGTERM", () => void cleanup(143));
 
 try {
   if (isReviewTask) {
-    reviewGuardDir = await installReviewCommandGuards();
+    installReviewCommandGuards();
     await enableReviewExecutionGuard();
   }
 
@@ -461,48 +458,21 @@ async function cleanup(exitCode) {
       content: `Codex app-server stderr: ${truncate(daemonStderr.trim(), 1200)}`,
     });
   }
-
-  if (reviewGuardDir) {
-    await rm(reviewGuardDir, { recursive: true, force: true });
-  }
 }
 
-async function installReviewCommandGuards() {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "optio-codex-review-"));
-  const blockedGitCommands =
-    "add|am|apply|checkout|cherry-pick|clean|commit|merge|rebase|reset|restore|revert|switch|push";
-  const gitGuard = `#!/bin/sh
-case "${"$"}{1:-}" in
-  ${blockedGitCommands})
-    echo "Optio review mode blocks git ${"$"}{1:-}; reviews must not modify or push code." >&2
-    exit 126
-    ;;
-esac
-exec /usr/bin/git "${"$"}@"
-`;
-  const ghGuard = `#!/bin/sh
-case "${"$"}{1:-}:${"$"}{2:-}" in
-  pr:diff|pr:view|pr:review)
-    exec /usr/bin/gh "${"$"}@"
-    ;;
-esac
-echo "Optio review mode blocks gh ${"$"}*; only gh pr diff, view, and review are allowed." >&2
-exit 126
-`;
-
-  await Promise.all([
-    writeFile(path.join(dir, "git"), gitGuard, { mode: 0o755 }),
-    writeFile(path.join(dir, "gh"), ghGuard, { mode: 0o755 }),
-  ]);
-  await Promise.all([chmod(path.join(dir, "git"), 0o755), chmod(path.join(dir, "gh"), 0o755)]);
-  process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
+function installReviewCommandGuards() {
+  // Do not create PATH shims named git/gh. Codex app-server itself creates
+  // temporary command wrappers with those names, and the overlapping wrappers
+  // can intercept each other before reaching the canonical guarded binaries.
+  // A minimal trusted PATH selects the image's /usr/bin wrappers; LD_PRELOAD
+  // remains the process-level boundary for absolute paths and child processes.
+  process.env.PATH = "/usr/local/bin:/usr/bin:/bin";
   emit({
     type: "message",
     role: "system",
     content:
-      "Review execution guards enabled: repository writes and non-review GitHub operations are blocked.",
+      "Review execution guards enabled: canonical Git/GitHub commands and repository writes are guarded.",
   });
-  return dir;
 }
 
 async function enableReviewExecutionGuard() {

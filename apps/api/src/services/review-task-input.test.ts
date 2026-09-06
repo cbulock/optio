@@ -39,6 +39,15 @@ describe("parseReviewTaskVerdict", () => {
     ).toBe("request_changes");
   });
 
+  it("recognizes a completed same-author fallback comment", () => {
+    expect(
+      parseReviewTaskVerdict(
+        "https://github.com/cbulock/music-studio/pull/22#issuecomment-1\n" +
+          "Submitted a changes-requested comment on PR #22",
+      ),
+    ).toBe("request_changes");
+  });
+
   it("does not infer a verdict from ordinary review prose", () => {
     expect(parseReviewTaskVerdict("I would request changes, but GitHub rejected it.")).toBeNull();
   });
