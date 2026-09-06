@@ -69,11 +69,8 @@ export function resolveEffectiveReviewStatus(
   return platformStatus;
 }
 
-export function shouldPreserveInternalReviewVerdict(
-  storedStatus: string | null,
-  platformStatus: string,
-): boolean {
-  return storedStatus === "approved" || platformStatus === "pending" || platformStatus === "none";
+export function shouldPreserveInternalReviewVerdict(platformStatus: string): boolean {
+  return platformStatus === "pending" || platformStatus === "none";
 }
 
 export const prWatcherQueue = new Queue("pr-watcher", { connection: connectionOpts });
@@ -185,12 +182,13 @@ export function startPrWatcherWorker() {
             // Reading the cached status alone would then overwrite the new
             // durable self-review verdict with GitHub's COMMENTED/pending
             // representation.
-            prReviewStatus: shouldPreserveInternalReviewVerdict(
-              task.prReviewStatus,
-              reviewResult.status,
-            )
+            prReviewStatus: shouldPreserveInternalReviewVerdict(reviewResult.status)
               ? sql`CASE WHEN ${tasks.prReviewStatus} IN ('changes_requested', 'approved') THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
-              : reviewStatus,
+              // This must still be evaluated in SQL. The watcher may have
+              // read `pending` immediately before a self-review persisted
+              // `approved`; assigning the stale platform value directly
+              // would otherwise undo that completion.
+              : sql`CASE WHEN ${tasks.prReviewStatus} = 'approved' THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`,
             updatedAt: new Date(),
           };
           if (reviewComments) {
