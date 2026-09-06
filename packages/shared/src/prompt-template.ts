@@ -225,6 +225,10 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 - Do NOT run builds, install dependencies, or execute test suites beyond the
   configured verification command above.
 - Your job is to READ the diff and submit a review. That's it.
+- Treat existing review comments in the task context as historical evidence,
+  not current findings. Before repeating any prior concern, verify it against
+  the current PR diff and head files; do not submit feedback for an issue that
+  the current head already resolves.
 - Only request changes for real issues, not style nitpicks.
 - Be specific about what needs fixing and why.
 - If the code correctly implements the task and you are not the PR author, approve it.
