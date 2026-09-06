@@ -84,9 +84,15 @@ static bool git_read_only(char *const argv[]) {
 }
 
 static bool gh_review_only(char *const argv[]) {
-  return argv[1] && argv[2] && strcmp(argv[1], "pr") == 0 &&
-    (strcmp(argv[2], "diff") == 0 || strcmp(argv[2], "view") == 0 ||
-     strcmp(argv[2], "review") == 0 || strcmp(argv[2], "comment") == 0);
+  if (!argv[1] || !argv[2]) return false;
+  if (strcmp(argv[1], "pr") == 0) {
+    return strcmp(argv[2], "diff") == 0 || strcmp(argv[2], "view") == 0 ||
+      strcmp(argv[2], "review") == 0 || strcmp(argv[2], "comment") == 0;
+  }
+  // Identity lookup lets a review detect self-review without opening arbitrary
+  // GitHub API access. Permit only `gh api user` with an optional jq selector.
+  return strcmp(argv[1], "api") == 0 && strcmp(argv[2], "user") == 0 &&
+    (!argv[3] || (strcmp(argv[3], "--jq") == 0 && argv[4] && !argv[5]));
 }
 
 static bool is_package_mutation(const char *cmd, char *const argv[]) {
