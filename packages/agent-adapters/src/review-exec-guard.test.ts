@@ -41,15 +41,40 @@ describe("Codex review execution guard", () => {
     expect(image).toContain("ln -s /opt/optio/review-guard-git /usr/bin/git");
     expect(image).toContain("ln -s /opt/optio/review-guard-gh /usr/bin/gh");
     expect(readFileSync(ghWrapper, "utf8")).toContain('"${2:-}" != "review"');
+    expect(readFileSync(ghWrapper, "utf8")).toContain('"${2:-}" != "comment"');
     expect(readFileSync(ghWrapper, "utf8")).toContain("exec /opt/optio/gh-real");
     expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git");
   });
 
-  it("permits the minimal GitHub review submission command", () => {
+  it("permits only GitHub PR review submission and comment commands", () => {
     const wrapper = readFileSync(ghWrapper, "utf8");
     expect(wrapper).toContain('"${1:-}" != "pr"');
     expect(wrapper).toContain('"${2:-}" != "diff"');
     expect(wrapper).toContain('"${2:-}" != "view"');
     expect(wrapper).toContain('"${2:-}" != "review"');
+    expect(wrapper).toContain('"${2:-}" != "comment"');
+  });
+
+  it("permits a PR comment but still rejects unrelated GitHub writes", () => {
+    const temp = mkdtempSync(`${tmpdir()}/optio-review-guard-gh-`);
+    cleanup.push(temp);
+    const library = `${temp}/guard.so`;
+    const fakeGh = `${temp}/gh`;
+    execFileSync("gcc", ["-shared", "-fPIC", "-O2", "-o", library, source, "-ldl"]);
+    execFileSync("sh", [
+      "-c",
+      `printf '%s\\n' '#!/bin/sh' 'exit 0' > ${fakeGh} && chmod 755 ${fakeGh}`,
+    ]);
+
+    const env = { ...process.env, LD_PRELOAD: library };
+
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGh} pr comment 22 --body \"Changes requested\"`], { env })
+        .status,
+    ).toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGh} issue comment 22 --body \"not allowed\"`], { env })
+        .status,
+    ).not.toBe(0);
   });
 });

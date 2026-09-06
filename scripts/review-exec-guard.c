@@ -75,7 +75,7 @@ static bool git_read_only(char *const argv[]) {
 static bool gh_review_only(char *const argv[]) {
   return argv[1] && argv[2] && strcmp(argv[1], "pr") == 0 &&
     (strcmp(argv[2], "diff") == 0 || strcmp(argv[2], "view") == 0 ||
-     strcmp(argv[2], "review") == 0);
+     strcmp(argv[2], "review") == 0 || strcmp(argv[2], "comment") == 0);
 }
 
 static bool is_package_mutation(const char *cmd, char *const argv[]) {
