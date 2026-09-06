@@ -3,7 +3,7 @@ import {
   determineCheckStatus,
   determineReviewStatus,
   resolveEffectiveReviewStatus,
-  shouldPreserveInternalChangesRequested,
+  shouldPreserveInternalReviewVerdict,
 } from "./pr-watcher-worker.js";
 
 describe("determineCheckStatus", () => {
@@ -104,13 +104,21 @@ describe("resolveEffectiveReviewStatus", () => {
       "changes_requested",
     );
   });
+
+  it("preserves Optio approval verdicts when an author's review is a comment", () => {
+    expect(resolveEffectiveReviewStatus("approved", "pending")).toBe("approved");
+    expect(resolveEffectiveReviewStatus("approved", "none")).toBe("approved");
+    expect(resolveEffectiveReviewStatus("approved", "changes_requested")).toBe(
+      "changes_requested",
+    );
+  });
 });
 
-describe("shouldPreserveInternalChangesRequested", () => {
+describe("shouldPreserveInternalReviewVerdict", () => {
   it("uses atomic preservation only for non-substantive platform results", () => {
-    expect(shouldPreserveInternalChangesRequested("pending")).toBe(true);
-    expect(shouldPreserveInternalChangesRequested("none")).toBe(true);
-    expect(shouldPreserveInternalChangesRequested("approved")).toBe(false);
-    expect(shouldPreserveInternalChangesRequested("changes_requested")).toBe(false);
+    expect(shouldPreserveInternalReviewVerdict("pending")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict("none")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict("approved")).toBe(false);
+    expect(shouldPreserveInternalReviewVerdict("changes_requested")).toBe(false);
   });
 });
