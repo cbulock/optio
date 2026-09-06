@@ -48,6 +48,24 @@ export function determineReviewStatus(reviews: { state: string; body?: string }[
   return { status: "none", comments: "" };
 }
 
+/**
+ * GitHub reports a same-author review as COMMENTED even when Optio's review
+ * agent explicitly requested changes. Keep that durable internal verdict
+ * until GitHub supplies a substantive approval or request-changes review.
+ */
+export function resolveEffectiveReviewStatus(
+  storedStatus: string | null,
+  platformStatus: string,
+): string {
+  if (
+    storedStatus === "changes_requested" &&
+    (platformStatus === "pending" || platformStatus === "none")
+  ) {
+    return storedStatus;
+  }
+  return platformStatus;
+}
+
 export const prWatcherQueue = new Queue("pr-watcher", { connection: connectionOpts });
 
 export function startPrWatcherWorker() {
@@ -120,7 +138,10 @@ export function startPrWatcherWorker() {
           const reviewsData = await platform.getReviews(ri, prNumber).catch(() => []);
           const checksStatus = determineCheckStatus(checkRuns);
           const reviewResult = determineReviewStatus(reviewsData);
-          const reviewStatus = reviewResult.status;
+          const reviewStatus = resolveEffectiveReviewStatus(
+            task.prReviewStatus,
+            reviewResult.status,
+          );
           let reviewComments = reviewResult.comments;
 
           // If changes requested, also fetch inline comments for context.
