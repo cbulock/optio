@@ -76,6 +76,20 @@ describe("launchReview", () => {
     await expect(launchReview("nonexistent")).rejects.toThrow("Parent task not found");
   });
 
+  it("rejects nesting a review under another review", async () => {
+    mockGetTask.mockResolvedValueOnce({
+      id: "review-1",
+      taskType: "review",
+      prUrl: "https://github.com/org/repo/pull/42",
+      repoUrl: "https://github.com/org/repo",
+    });
+
+    await expect(launchReview("review-1")).rejects.toThrow(
+      "Cannot launch a review for a review task",
+    );
+    expect(mockCreateSubtask).not.toHaveBeenCalled();
+  });
+
   it("throws when parent task has no PR", async () => {
     mockGetTask.mockResolvedValueOnce({
       id: "task-1",

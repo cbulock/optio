@@ -85,6 +85,9 @@ async function fetchPrContext(
 export async function launchReview(parentTaskId: string): Promise<string> {
   const parentTask = await taskService.getTask(parentTaskId);
   if (!parentTask) throw new Error("Parent task not found");
+  if (parentTask.taskType === "review") {
+    throw new Error("Cannot launch a review for a review task");
+  }
   if (!parentTask.prUrl) throw new Error("Parent task has no PR");
 
   // Parse PR number from URL (works for both GitHub and GitLab)
