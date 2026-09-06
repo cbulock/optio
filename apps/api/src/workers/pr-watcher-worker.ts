@@ -66,6 +66,10 @@ export function resolveEffectiveReviewStatus(
   return platformStatus;
 }
 
+export function shouldPreserveInternalChangesRequested(platformStatus: string): boolean {
+  return platformStatus === "pending" || platformStatus === "none";
+}
+
 export const prWatcherQueue = new Queue("pr-watcher", { connection: connectionOpts });
 
 export function startPrWatcherWorker() {
@@ -170,7 +174,14 @@ export function startPrWatcherWorker() {
             prNumber,
             prState: prData.merged ? "merged" : prData.state,
             prChecksStatus: effectiveChecksStatus,
-            prReviewStatus: reviewStatus,
+            // Evaluate this against the row at write time. A review can finish
+            // after this watcher read `task` but before its update commits.
+            // Reading the cached status alone would then overwrite the new
+            // durable self-review verdict with GitHub's COMMENTED/pending
+            // representation.
+            prReviewStatus: shouldPreserveInternalChangesRequested(reviewResult.status)
+              ? sql`CASE WHEN ${tasks.prReviewStatus} = 'changes_requested' THEN ${tasks.prReviewStatus} ELSE ${reviewStatus} END`
+              : reviewStatus,
             updatedAt: new Date(),
           };
           if (reviewComments) {
