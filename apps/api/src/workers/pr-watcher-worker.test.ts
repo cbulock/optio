@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { determineCheckStatus, determineReviewStatus } from "./pr-watcher-worker.js";
+import {
+  determineCheckStatus,
+  determineReviewStatus,
+  resolveEffectiveReviewStatus,
+} from "./pr-watcher-worker.js";
 
 describe("determineCheckStatus", () => {
   it("returns none for empty check runs", () => {
@@ -84,5 +88,19 @@ describe("determineReviewStatus", () => {
         { state: "APPROVED", body: "Fixed" },
       ]),
     ).toEqual({ status: "approved", comments: "" });
+  });
+});
+
+describe("resolveEffectiveReviewStatus", () => {
+  it("preserves Optio changes-requested verdicts when self-reviews appear as comments", () => {
+    expect(resolveEffectiveReviewStatus("changes_requested", "pending")).toBe("changes_requested");
+    expect(resolveEffectiveReviewStatus("changes_requested", "none")).toBe("changes_requested");
+  });
+
+  it("accepts a later substantive platform review", () => {
+    expect(resolveEffectiveReviewStatus("changes_requested", "approved")).toBe("approved");
+    expect(resolveEffectiveReviewStatus("changes_requested", "changes_requested")).toBe(
+      "changes_requested",
+    );
   });
 });
