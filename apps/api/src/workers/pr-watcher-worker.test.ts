@@ -3,6 +3,7 @@ import {
   determineCheckStatus,
   determineReviewStatus,
   resolveEffectiveReviewStatus,
+  shouldPreserveInternalChangesRequested,
 } from "./pr-watcher-worker.js";
 
 describe("determineCheckStatus", () => {
@@ -102,5 +103,14 @@ describe("resolveEffectiveReviewStatus", () => {
     expect(resolveEffectiveReviewStatus("changes_requested", "changes_requested")).toBe(
       "changes_requested",
     );
+  });
+});
+
+describe("shouldPreserveInternalChangesRequested", () => {
+  it("uses atomic preservation only for non-substantive platform results", () => {
+    expect(shouldPreserveInternalChangesRequested("pending")).toBe(true);
+    expect(shouldPreserveInternalChangesRequested("none")).toBe(true);
+    expect(shouldPreserveInternalChangesRequested("approved")).toBe(false);
+    expect(shouldPreserveInternalChangesRequested("changes_requested")).toBe(false);
   });
 });
