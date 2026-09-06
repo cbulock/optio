@@ -93,6 +93,13 @@ describe("determineReviewStatus", () => {
 });
 
 describe("resolveEffectiveReviewStatus", () => {
+  it("re-derives the newest completed internal verdict when the parent field was reset", () => {
+    expect(resolveEffectiveReviewStatus("pending", "pending", "request_changes")).toBe(
+      "changes_requested",
+    );
+    expect(resolveEffectiveReviewStatus("pending", "none", "approve")).toBe("approved");
+  });
+
   it("preserves Optio changes-requested verdicts when self-reviews appear as comments", () => {
     expect(resolveEffectiveReviewStatus("changes_requested", "pending")).toBe("changes_requested");
     expect(resolveEffectiveReviewStatus("changes_requested", "none")).toBe("changes_requested");
