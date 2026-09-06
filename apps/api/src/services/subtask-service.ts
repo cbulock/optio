@@ -194,7 +194,14 @@ export async function onSubtaskComplete(subtaskId: string) {
     // stuck after a newer review concludes.
     const latestReview = reviewSubtasks
       .filter((r) => r.state === "completed" && getStoredReviewTaskVerdict(r.metadata))
-      .sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))[0];
+      // Drizzle returns Dates in production but test/adapter boundaries may
+      // serialize them as ISO strings. Normalize both forms so insertion
+      // order can never make an older request outrank a newer approval.
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt ?? b.completedAt ?? b.createdAt ?? 0).getTime() -
+          new Date(a.updatedAt ?? a.completedAt ?? a.createdAt ?? 0).getTime(),
+      )[0];
     const latestVerdict = latestReview && getStoredReviewTaskVerdict(latestReview.metadata);
 
     if (latestVerdict === "request_changes") {
