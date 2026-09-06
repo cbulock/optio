@@ -113,10 +113,9 @@ describe("resolveEffectiveReviewStatus", () => {
 });
 
 describe("shouldPreserveInternalReviewVerdict", () => {
-  it("preserves a durable Optio approval over historical platform feedback", () => {
-    expect(shouldPreserveInternalReviewVerdict(null, "pending")).toBe(true);
-    expect(shouldPreserveInternalReviewVerdict(null, "none")).toBe(true);
-    expect(shouldPreserveInternalReviewVerdict("approved", "changes_requested")).toBe(true);
-    expect(shouldPreserveInternalReviewVerdict(null, "changes_requested")).toBe(false);
+  it("uses the atomic update path for non-substantive platform feedback", () => {
+    expect(shouldPreserveInternalReviewVerdict("pending")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict("none")).toBe(true);
+    expect(shouldPreserveInternalReviewVerdict("changes_requested")).toBe(false);
   });
 });
