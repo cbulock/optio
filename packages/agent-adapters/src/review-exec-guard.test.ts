@@ -48,6 +48,15 @@ describe("Codex review execution guard", () => {
     expect(readFileSync(gitWrapper, "utf8")).toContain("get-url");
   });
 
+  it("uses canonical command paths instead of colliding with Codex temporary shims", () => {
+    const client = readFileSync(
+      resolve(root, "packages/agent-adapters/src/codex-app-server-client.mjs"),
+      "utf8",
+    );
+    expect(client).toContain('process.env.PATH = "/usr/local/bin:/usr/bin:/bin"');
+    expect(client).not.toContain('mkdtemp(path.join(os.tmpdir(), "optio-codex-review-"))');
+  });
+
   it("permits only GitHub PR review submission and comment commands", () => {
     const wrapper = readFileSync(ghWrapper, "utf8");
     expect(wrapper).toContain('"${1:-}" != "pr"');
