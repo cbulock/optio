@@ -42,9 +42,8 @@ describe("Codex review execution guard", () => {
     expect(image).toContain("ln -s /opt/optio/review-guard-gh /usr/bin/gh");
     expect(readFileSync(ghWrapper, "utf8")).toContain('[ "${2:-}" = "review" ]');
     expect(readFileSync(ghWrapper, "utf8")).toContain('[ "${2:-}" = "comment" ]');
-    expect(readFileSync(ghWrapper, "utf8")).toContain(
-      '[ "${1:-}" = "api" ] && [ "${2:-}" = "user" ]',
-    );
+    expect(readFileSync(ghWrapper, "utf8")).toContain('[ "${1:-}" = "api" ] && {');
+    expect(readFileSync(ghWrapper, "utf8")).toContain('repos/*');
     expect(readFileSync(ghWrapper, "utf8")).toContain("exec /opt/optio/gh-real");
     expect(readFileSync(gitWrapper, "utf8")).toContain("exec /opt/optio/git");
     expect(readFileSync(gitWrapper, "utf8")).toContain("--get-regexp");
@@ -60,10 +59,11 @@ describe("Codex review execution guard", () => {
     expect(client).not.toContain('mkdtemp(path.join(os.tmpdir(), "optio-codex-review-"))');
   });
 
-  it("permits review PR commands and only the read-only GitHub identity lookup", () => {
+  it("permits review PR commands and read-only GitHub identity or repository lookups", () => {
     const wrapper = readFileSync(ghWrapper, "utf8");
     expect(wrapper).toContain('[ "${1:-}" = "pr" ]');
-    expect(wrapper).toContain('[ "${1:-}" = "api" ] && [ "${2:-}" = "user" ]');
+    expect(wrapper).toContain('[ "${1:-}" = "api" ] && {');
+    expect(wrapper).toContain('repos/*');
   });
 
   it("permits a PR comment but still rejects unrelated GitHub writes", () => {
@@ -89,10 +89,13 @@ describe("Codex review execution guard", () => {
     ).not.toBe(0);
     expect(spawnSync("/bin/sh", ["-c", `${fakeGh} api user --jq .login`], { env }).status).toBe(0);
     expect(
-      spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio`], { env }).status,
-    ).not.toBe(0);
+      spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio/contents/src/cloud/CloudApp.tsx?ref=abc`], { env }).status,
+    ).toBe(0);
     expect(
       spawnSync("/bin/sh", ["-c", `${fakeGh} api user --method POST`], { env }).status,
+    ).not.toBe(0);
+    expect(
+      spawnSync("/bin/sh", ["-c", `${fakeGh} api repos/cbulock/music-studio --method POST`], { env }).status,
     ).not.toBe(0);
   });
 

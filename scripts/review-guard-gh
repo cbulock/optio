@@ -7,15 +7,17 @@ if [ "${OPTIO_REVIEW_GUARD_ACTIVE:-}" = "1" ]; then
     [ "${2:-}" = "diff" ] || [ "${2:-}" = "view" ] || [ "${2:-}" = "review" ] || [ "${2:-}" = "comment" ];
   }; then
     allowed=true
-  elif [ "${1:-}" = "api" ] && [ "${2:-}" = "user" ]; then
-    # Reviewer identity checks may use `gh api user --jq .login`. Keep this
-    # endpoint read-only and reject all other API routes and extra arguments.
+  elif [ "${1:-}" = "api" ] && {
+    [ "${2:-}" = "user" ] || case "${2:-}" in repos/*) true ;; *) false ;; esac;
+  }; then
+    # Reviewers may identify themselves or read repository content. Keep API
+    # access read-only: only the endpoint and an optional jq selector are safe.
     if [ -z "${3:-}" ] || { [ "${3:-}" = "--jq" ] && [ -n "${4:-}" ] && [ -z "${5:-}" ]; }; then
       allowed=true
     fi
   fi
   if [ "$allowed" != true ]; then
-    echo "Optio review guard blocks this gh operation; only review PR commands and gh api user are allowed." >&2
+    echo "Optio review guard blocks this gh operation; only review PR commands and read-only gh api user/repos lookups are allowed." >&2
     exit 126
   fi
 fi
