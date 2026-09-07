@@ -494,6 +494,25 @@ describe("PR_OPENED — combined signals", () => {
     }
   });
 
+  it("preserves a completed internal changes-requested verdict when GitHub reports a self-review comment", () => {
+    const s = repoSnapshot(
+      {},
+      {
+        state: TaskState.PR_OPENED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: "passing",
+        prReviewStatus: "changes_requested",
+        prState: "open",
+      },
+      {
+        pr: makePr({ checksStatus: "passing", reviewStatus: "pending" }),
+      },
+    );
+
+    expect(reconcileRepo(s).kind).toBe("noop");
+  });
+
   it("CI passing stale (already seen) → no launchReview re-trigger", () => {
     const s = repoSnapshot(
       {},

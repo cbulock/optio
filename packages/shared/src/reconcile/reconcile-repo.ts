@@ -492,7 +492,16 @@ function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean)
   const patch: Partial<RepoRunStatus> = {};
   const effectiveChecks = effectiveChecksStatus(pr, status);
   if (prev.checks !== effectiveChecks) patch.prChecksStatus = effectiveChecks;
-  if (prev.review !== pr.reviewStatus) patch.prReviewStatus = pr.reviewStatus;
+  // GitHub reports a same-author Optio review as COMMENTED, which maps to
+  // pending. Do not overwrite the durable internal verdict after the watcher
+  // has restored it; otherwise reconciliation immediately recreates the UI
+  // regression the watcher just fixed.
+  const preserveInternalReviewVerdict =
+    (prev.review === "changes_requested" || prev.review === "approved") &&
+    (pr.reviewStatus === "pending" || pr.reviewStatus === "none");
+  if (prev.review !== pr.reviewStatus && !preserveInternalReviewVerdict) {
+    patch.prReviewStatus = pr.reviewStatus;
+  }
   if (status.prState !== pr.state) patch.prState = pr.state;
   if (Object.keys(patch).length > 0) {
     return {
