@@ -61,10 +61,7 @@ const codexAuthSessionSchema = z
 const codexAuthAccountUpsertSchema = z
   .object({
     appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
-    authJson: z
-      .string()
-      .optional()
-      .describe("Optional Codex auth.json payload for manual import"),
+    authJson: z.string().optional().describe("Optional Codex auth.json payload for manual import"),
   })
   .describe("Body for saving the managed Codex auth account");
 

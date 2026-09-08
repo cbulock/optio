@@ -1688,8 +1688,8 @@ export default function SetupPage() {
                             <input
                               type="text"
                               value={codexAppServerUrl}
-                                onChange={(e) => setCodexAppServerUrl(e.target.value)}
-                                onInput={() => setCodexAuthImported(false)}
+                              onChange={(e) => setCodexAppServerUrl(e.target.value)}
+                              onInput={() => setCodexAuthImported(false)}
                               onPaste={(e) => {
                                 e.preventDefault();
                                 const pasted = e.clipboardData.getData("text").trim();
@@ -1743,7 +1743,13 @@ export default function SetupPage() {
                             {codexLoginSessionId && (
                               <button
                                 type="button"
-                                onClick={() => window.open(`/sessions/${codexLoginSessionId}?setup=codex-login`, "_blank", "noopener,noreferrer")}
+                                onClick={() =>
+                                  window.open(
+                                    `/sessions/${codexLoginSessionId}?setup=codex-login`,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  )
+                                }
                                 className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:border-primary"
                               >
                                 Reopen Login Session
@@ -1781,7 +1787,7 @@ export default function SetupPage() {
                                     setCodexAuthImported(false);
                                   }
                                 }}
-                                placeholder='Paste ~/.codex/auth.json from a machine already logged into Codex'
+                                placeholder="Paste ~/.codex/auth.json from a machine already logged into Codex"
                                 className="w-full min-h-32 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
                               />
                             </div>

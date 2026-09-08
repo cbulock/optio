@@ -7,10 +7,14 @@ import { retrieveSecretWithFallback, storeSecret } from "./secret-service.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 
 function workspaceCondition(workspaceId?: string | null) {
-  return workspaceId ? eq(codexAuthAccounts.workspaceId, workspaceId) : isNull(codexAuthAccounts.workspaceId);
+  return workspaceId
+    ? eq(codexAuthAccounts.workspaceId, workspaceId)
+    : isNull(codexAuthAccounts.workspaceId);
 }
 
-async function collectExecOutput(session: ExecSession): Promise<{ stdout: string; stderr: string }> {
+async function collectExecOutput(
+  session: ExecSession,
+): Promise<{ stdout: string; stderr: string }> {
   const stdoutChunks: Buffer[] = [];
   const stderrChunks: Buffer[] = [];
 
@@ -99,16 +103,18 @@ export async function getCodexAppServerConfig(opts: {
   userId?: string | null;
 }) {
   const account = await getCodexAuthAccount(opts.workspaceId);
-  const codexAuthJson = (
-    await retrieveSecretWithFallback("CODEX_AUTH_JSON", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
-  const legacyUrl = (
-    await retrieveSecretWithFallback("CODEX_APP_SERVER_URL", "global", opts.workspaceId, opts.userId).catch(
-      () => null,
-    )
-  ) as string | null;
+  const codexAuthJson = (await retrieveSecretWithFallback(
+    "CODEX_AUTH_JSON",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
+  const legacyUrl = (await retrieveSecretWithFallback(
+    "CODEX_APP_SERVER_URL",
+    "global",
+    opts.workspaceId,
+    opts.userId,
+  ).catch(() => null)) as string | null;
 
   return {
     appServerUrl: account?.appServerUrl ?? legacyUrl ?? undefined,

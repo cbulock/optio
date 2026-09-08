@@ -259,10 +259,7 @@ try {
 } catch (error) {
   emit({
     type: "error",
-    message:
-      error instanceof Error
-        ? error.message
-        : "Codex app-server execution failed",
+    message: error instanceof Error ? error.message : "Codex app-server execution failed",
   });
   await cleanup(1);
   process.exit(1);
@@ -327,8 +324,7 @@ function emitCompletedItem(item, threadId, streamedAgentItems) {
         id: threadId,
         type: "function_call_output",
         call_id: item.id,
-        output:
-          typeof item.result === "string" ? item.result : JSON.stringify(item.result),
+        output: typeof item.result === "string" ? item.result : JSON.stringify(item.result),
       });
     }
     return;

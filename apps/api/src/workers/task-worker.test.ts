@@ -159,9 +159,7 @@ describe("buildAgentCommand", () => {
       const env = { OPTIO_PROMPT: "Build feature", OPTIO_TASK_ID: "task-123" };
       const cmds = buildAgentCommand("codex", env);
       expect(cmds.some((c) => c.includes("codex exec"))).toBe(true);
-      expect(
-        cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox")),
-      ).toBe(true);
+      expect(cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox"))).toBe(true);
       expect(cmds.some((c) => c.includes("--json"))).toBe(true);
     });
 
@@ -198,9 +196,7 @@ describe("buildAgentCommand", () => {
         OPTIO_CODEX_APP_SERVER_URL: "ws://localhost:3900/v1/connect",
       };
       const cmds = buildAgentCommand("codex", env);
-      expect(cmds.some((c) => c.includes("node .optio/codex-app-server-client.mjs"))).toBe(
-        true,
-      );
+      expect(cmds.some((c) => c.includes("node .optio/codex-app-server-client.mjs"))).toBe(true);
       expect(cmds.some((c) => c.includes("--remote"))).toBe(false);
       expect(cmds.some((c) => c.includes("codex login --with-api-key"))).toBe(false);
     });

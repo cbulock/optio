@@ -177,9 +177,7 @@ describe("buildWorkflowAgentCommand", () => {
         OPTIO_PROMPT: "Build feature",
       });
       expect(cmds.some((c) => c.includes("codex exec"))).toBe(true);
-      expect(
-        cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox")),
-      ).toBe(true);
+      expect(cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox"))).toBe(true);
     });
   });
 

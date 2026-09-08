@@ -352,7 +352,7 @@ describe("POST /api/setup/codex-auth", () => {
       url: "/api/setup/codex-auth",
       payload: {
         appServerUrl: "ws://localhost:3900/v1/connect",
-        authJson: "{\"token\":\"abc\"}",
+        authJson: '{"token":"abc"}',
       },
     });
 
@@ -361,7 +361,7 @@ describe("POST /api/setup/codex-auth", () => {
       workspaceId: "ws-1",
       userId: "u1",
       appServerUrl: "ws://localhost:3900/v1/connect",
-      authJson: "{\"token\":\"abc\"}",
+      authJson: '{"token":"abc"}',
     });
     expect(res.json().account.status).toBe("connected");
   });

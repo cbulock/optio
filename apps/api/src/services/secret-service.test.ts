@@ -776,7 +776,7 @@ describe("secret-service", () => {
         { name: "NPM_TOKEN", scope: "global", value: "npm-value" },
         { name: "CLAUDE_CODE_OAUTH_TOKEN", scope: "global", value: "should-be-blocked" },
         { name: "CODEX_ACCESS_TOKEN", scope: "global", value: "should-be-blocked" },
-        { name: "CODEX_AUTH_JSON", scope: "global", value: "{\"auth\":\"blocked\"}" },
+        { name: "CODEX_AUTH_JSON", scope: "global", value: '{"auth":"blocked"}' },
         { name: "ANTHROPIC_API_KEY", scope: "global", value: "should-be-blocked" },
         { name: "OPENAI_API_KEY", scope: "global", value: "should-be-blocked" },
         { name: "GEMINI_API_KEY", scope: "global", value: "should-be-blocked" },
